@@ -344,8 +344,19 @@ function openPrintDialog(entity) {
   qrDialog.value = false
 }
 
+function updateQrSize(event) {
+  const size = Number(event.currentTarget.value)
+  if (Number.isFinite(size) && size >= 10 && size <= 200) {
+    printSettings.value.qrSizeMm = size
+  }
+}
+
+function restoreQrSize(event) {
+  event.currentTarget.value = String(printSettings.value.qrSizeMm)
+}
+
 async function downloadPrintSvg() {
-  if (!printEntity.value || !printMetrics.value?.isPrintable) return
+  if (!printEntity.value || !printMetrics.value) return
   await runAction(async () => {
     const svg = createSlicerQrSvg(buildEntityUrl(printEntity.value), {
       sizeMm: printSettings.value.qrSizeMm,
@@ -359,7 +370,7 @@ async function downloadPrintSvg() {
 }
 
 async function downloadPrintStl() {
-  if (!printEntity.value || !printMetrics.value?.isPrintable) return
+  if (!printEntity.value || !printMetrics.value) return
   await runAction(async () => {
     const { createPrintableQrStl } = await import('./services/print3d')
     const stl = createPrintableQrStl(buildEntityUrl(printEntity.value), printSettings.value)
@@ -865,11 +876,24 @@ function emptyPagination() {
             </label>
             <label class="field">
               <span>Tamaño del QR</span>
-              <select v-model.number="printSettings.qrSizeMm">
-                <option :value="50">50 mm</option>
-                <option :value="60">60 mm</option>
-                <option :value="80">80 mm</option>
-              </select>
+              <input
+                :value="printSettings.qrSizeMm"
+                type="number"
+                inputmode="decimal"
+                min="10"
+                max="200"
+                step="1"
+                list="qr-print-sizes"
+                aria-label="Tamaño del QR en milímetros"
+                @input="updateQrSize"
+                @blur="restoreQrSize"
+              />
+              <datalist id="qr-print-sizes">
+                <option value="26"></option>
+                <option value="50"></option>
+                <option value="60"></option>
+                <option value="80"></option>
+              </datalist>
             </label>
             <label class="field">
               <span>Boquilla</span>
@@ -907,6 +931,9 @@ function emptyPagination() {
                 módulo {{ printMetrics.moduleSizeMm.toFixed(2) }} mm ·
                 recomendado {{ printMetrics.recommendedModuleMm.toFixed(2) }} mm o más
               </span>
+              <span v-if="!printMetrics.isPrintable">
+                Puedes descargar el modelo, pero conviene usar una boquilla más fina o aumentar el tamaño del QR.
+              </span>
             </div>
           </div>
 
@@ -916,10 +943,10 @@ function emptyPagination() {
           </p>
 
           <div class="print-actions">
-            <v-btn variant="tonal" :disabled="!printMetrics.isPrintable || isSaving" @click="downloadPrintSvg">
+            <v-btn variant="tonal" :disabled="isSaving" @click="downloadPrintSvg">
               <Download :size="18" /> Descargar SVG
             </v-btn>
-            <v-btn color="primary" variant="flat" :disabled="!printMetrics.isPrintable" :loading="isSaving" @click="downloadPrintStl">
+            <v-btn color="primary" variant="flat" :loading="isSaving" @click="downloadPrintStl">
               <Download :size="18" /> Descargar STL
             </v-btn>
           </div>
