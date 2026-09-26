@@ -351,8 +351,8 @@ function getCategoryCopy(currentCategory) {
       <v-main class="main-area">
         <section class="content">
           <div class="headline">
-            <h1>Identificación</h1>
-            <p>Guarda datos personalizados desde un código QR</p>
+            <h1>Información útil, siempre a mano</h1>
+            <p>Consulta y actualiza los datos vinculados a este código QR</p>
           </div>
 
           <v-sheet class="id-card" rounded="xl" border>
