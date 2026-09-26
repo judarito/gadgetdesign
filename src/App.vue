@@ -32,6 +32,7 @@ const errorMessage = ref('')
 const canUseCrud = computed(() => routeContext.isValid && !isLoading.value && !isSaving.value)
 const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
 const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
+const categoryCopy = computed(() => getCategoryCopy(category.value))
 const helperText = computed(() => {
   if (isAtCustomDataLimit.value) return `Límite alcanzado: ${CUSTOM_DATA_LIMIT} datos personalizados.`
 
@@ -281,6 +282,45 @@ function getComparableTokens(value) {
     .filter((word) => word && !ignoredWords.has(word))
     .map((word) => (word.length >= 5 ? word.slice(0, 4) : word))
 }
+
+function getCategoryCopy(currentCategory) {
+  const categoryCode = String(currentCategory?.code || '').trim().toUpperCase()
+  const normalizedName = normalizeKey(currentCategory?.name || '')
+  const subjects = {
+    VEH: 'vehículo',
+    vehiculo: 'vehículo',
+    vehiculos: 'vehículo',
+    mascota: 'mascota',
+    mascotas: 'mascota',
+    persona: 'persona',
+    personas: 'persona',
+    equipo: 'equipo',
+    equipos: 'equipo',
+    objeto: 'objeto',
+    objetos: 'objeto',
+  }
+  const subject = subjects[categoryCode] || subjects[normalizedName]
+
+  if (subject) {
+    return {
+      title: `Datos de tu ${subject}`,
+      newData: `Puedes agregar un nuevo dato para tu ${subject}.`,
+    }
+  }
+
+  const categoryName = String(currentCategory?.name || '').trim()
+  if (categoryName) {
+    return {
+      title: `Datos de ${categoryName}`,
+      newData: `Puedes agregar un nuevo dato para la categoría ${categoryName}.`,
+    }
+  }
+
+  return {
+    title: 'Datos de tu identificación',
+    newData: 'Puedes agregar un nuevo dato a esta identificación.',
+  }
+}
 </script>
 
 <template>
@@ -334,8 +374,8 @@ function getComparableTokens(value) {
                 <AppIcon name="user" />
               </span>
               <div>
-                <h2>Datos personalizados</h2>
-                <p>Agrega y administra la información que necesites</p>
+                <h2>{{ categoryCopy.title }}</h2>
+                <p>Consulta y administra la información guardada</p>
               </div>
             </div>
 
@@ -519,6 +559,11 @@ function getComparableTokens(value) {
                   </v-btn>
                 </div>
               </form>
+            </div>
+
+            <div v-if="!isLoading && !isAtCustomDataLimit" class="new-data-intro">
+              <strong>Agregar otro dato</strong>
+              <span>{{ categoryCopy.newData }}</span>
             </div>
 
             <form
@@ -1148,6 +1193,23 @@ function getComparableTokens(value) {
   border: 1px solid #d7e7f8;
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(235, 247, 255, 0.98), rgba(244, 250, 255, 0.94));
+}
+
+.new-data-intro {
+  display: grid;
+  gap: 2px;
+  margin: 4px 2px 9px;
+  color: #304d89;
+}
+
+.new-data-intro strong {
+  color: #11154b;
+  font-size: 0.98rem;
+}
+
+.new-data-intro span {
+  font-size: 0.86rem;
+  line-height: 1.35;
 }
 
 @media (max-width: 760px) {
