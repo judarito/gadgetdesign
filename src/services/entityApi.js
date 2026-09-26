@@ -1,5 +1,6 @@
 import { createCustomDataItem, parseCustomData, serializeCustomData } from './customData'
 import { getTursoClient } from './tursoClient'
+import { generateShortCode, isUuid } from './shortCode'
 import {
   sanitizeCustomDataInput,
   validateCategoryCode,
@@ -9,12 +10,17 @@ import {
 export const CUSTOM_DATA_LIMIT = 10
 
 export function getRouteContext(pathname = window.location.pathname) {
-  const [categoryCode, token] = pathname.split('/').filter(Boolean)
+  const segments = pathname.split('/').filter(Boolean)
+  const isShortRoute = segments.length === 1
+  const [categoryCode, token] = isShortRoute
+    ? [null, segments[0]]
+    : [segments[0], segments[1]]
 
   return {
     categoryCode,
     token,
-    isValid: Boolean(categoryCode && token),
+    isShortRoute,
+    isValid: Boolean(token && (isShortRoute || categoryCode) && segments.length <= 2),
   }
 }
 
@@ -24,19 +30,42 @@ export async function fetchEntity(categoryCode, token) {
 
 export async function createCustomData(categoryCode, token, payload) {
   const db = getTursoClient()
-  const safeCategoryCode = validateCategoryCode(categoryCode)
   const safeToken = validateEntityToken(token)
-  const category = await getCategoryByCode(db, safeCategoryCode)
+  const safeCategoryCode = categoryCode ? validateCategoryCode(categoryCode) : null
+  let category
+  let currentEntity
+
+  if (safeCategoryCode) {
+    category = await getCategoryByCode(db, safeCategoryCode)
+    currentEntity = category
+      ? await getEntityByToken(db, category.id, safeToken)
+      : null
+  } else {
+    currentEntity = await getEntityByShortCode(db, safeToken)
+    category = currentEntity
+      ? await getCategoryById(db, currentEntity.categoriaID)
+      : null
+  }
+
   if (!category) throw new Error('No se encontró la categoría.')
 
   const item = createCustomDataItem(payload)
-  const currentEntity = await getEntityByToken(db, category.id, safeToken)
 
   if (!currentEntity) {
+    if (!safeCategoryCode) throw new Error('No se encontró la entidad.')
+
+    const internalToken = isUuid(safeToken) ? safeToken : crypto.randomUUID()
+    const shortCode = isUuid(safeToken) ? generateShortCode() : safeToken
     await db.execute({
-      sql: `INSERT INTO Entidades (Identificacion, token, categoriaID, custom_data)
-            VALUES (?, ?, ?, ?)`,
-      args: [item.value, safeToken, category.id, serializeCustomData([item])],
+      sql: `INSERT INTO Entidades (Identificacion, token, short_code, categoriaID, custom_data)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [
+        item.value,
+        internalToken,
+        shortCode,
+        category.id,
+        serializeCustomData([item]),
+      ],
     })
 
     return getEntityContext(safeCategoryCode, safeToken)
@@ -58,7 +87,7 @@ export async function createCustomData(categoryCode, token, payload) {
 
 export async function updateCustomData(categoryCode, token, itemId, payload) {
   const db = getTursoClient()
-  const safeCategoryCode = validateCategoryCode(categoryCode)
+  const safeCategoryCode = categoryCode ? validateCategoryCode(categoryCode) : null
   const safeToken = validateEntityToken(token)
   const safePayload = sanitizeCustomDataInput(payload)
   const context = await getEntityContext(safeCategoryCode, safeToken)
@@ -88,7 +117,7 @@ export async function updateCustomData(categoryCode, token, itemId, payload) {
 
 export async function deleteCustomData(categoryCode, token, itemId) {
   const db = getTursoClient()
-  const safeCategoryCode = validateCategoryCode(categoryCode)
+  const safeCategoryCode = categoryCode ? validateCategoryCode(categoryCode) : null
   const safeToken = validateEntityToken(token)
   const context = await getEntityContext(safeCategoryCode, safeToken)
 
@@ -106,15 +135,27 @@ export async function deleteCustomData(categoryCode, token, itemId) {
 
 async function getEntityContext(categoryCode, token) {
   const db = getTursoClient()
-  const safeCategoryCode = validateCategoryCode(categoryCode)
   const safeToken = validateEntityToken(token)
-  const category = await getCategoryByCode(db, safeCategoryCode)
+  const safeCategoryCode = categoryCode ? validateCategoryCode(categoryCode) : null
+  let category
+  let entity
 
-  if (!category) {
-    throw new Error('No se encontró la categoría.')
+  if (safeCategoryCode) {
+    category = await getCategoryByCode(db, safeCategoryCode)
+    entity = category
+      ? await getEntityByToken(db, category.id, safeToken)
+      : null
+  } else {
+    entity = await getEntityByShortCode(db, safeToken)
+    category = entity
+      ? await getCategoryById(db, entity.categoriaID)
+      : null
   }
 
-  const entity = await getEntityByToken(db, category.id, safeToken)
+  if (!category) {
+    return { category: null, entity: null, suggestions: [] }
+  }
+
   const suggestions = await getSuggestionsByCategory(db, category.id)
 
   return {
@@ -134,23 +175,49 @@ async function getCategoryByCode(db, code) {
   return result.rows[0] ?? null
 }
 
+async function getCategoryById(db, categoryId) {
+  const result = await db.execute({
+    sql: 'SELECT id, name, active, code FROM Categorias WHERE id = ? LIMIT 1',
+    args: [categoryId],
+  })
+
+  return result.rows[0] ?? null
+}
+
 async function getEntityByToken(db, categoryId, token) {
   const safeToken = validateEntityToken(token)
   const result = await db.execute({
-    sql: `SELECT id, Identificacion AS identificacion, token, categoriaID, custom_data
+    sql: `SELECT id, Identificacion AS identificacion, token, short_code, categoriaID, custom_data
           FROM Entidades
-          WHERE categoriaID = ? AND token = ?
+          WHERE categoriaID = ? AND (short_code = ? OR token = ?)
           LIMIT 1`,
-    args: [categoryId, safeToken],
+    args: [categoryId, safeToken, safeToken],
   })
 
-  const entity = result.rows[0]
+  return mapEntity(result.rows[0])
+}
+
+async function getEntityByShortCode(db, shortCode) {
+  const safeShortCode = validateEntityToken(shortCode)
+  const result = await db.execute({
+    sql: `SELECT id, Identificacion AS identificacion, token, short_code, categoriaID, custom_data
+          FROM Entidades
+          WHERE short_code = ?
+          LIMIT 1`,
+    args: [safeShortCode],
+  })
+
+  return mapEntity(result.rows[0])
+}
+
+function mapEntity(entity) {
   if (!entity) return null
 
   return {
     id: entity.id,
     identificacion: entity.identificacion,
     token: entity.token,
+    shortCode: entity.short_code,
     categoriaID: entity.categoriaID,
     customData: parseCustomData(entity.custom_data),
   }

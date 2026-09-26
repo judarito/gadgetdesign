@@ -5,11 +5,13 @@ const DEFAULT_MODULE_SIZE_MM = 1
 
 export function createSlicerQrSvg(value, options = {}) {
   const margin = options.margin ?? DEFAULT_MARGIN_MODULES
-  const moduleSizeMm = options.moduleSizeMm ?? DEFAULT_MODULE_SIZE_MM
   const errorCorrectionLevel = options.errorCorrectionLevel ?? 'H'
   const qr = QRCode.create(value, { errorCorrectionLevel })
   const matrix = qr.modules
   const totalModules = matrix.size + margin * 2
+  const moduleSizeMm = options.sizeMm
+    ? Number(options.sizeMm) / totalModules
+    : options.moduleSizeMm ?? DEFAULT_MODULE_SIZE_MM
   const physicalSizeMm = totalModules * moduleSizeMm
   const path = buildClosedModulePath(matrix, margin)
 

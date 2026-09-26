@@ -14,6 +14,7 @@ import {
   Menu,
   Pencil,
   Plus,
+  Printer,
   QrCode as QrCodeIcon,
   RefreshCw,
   Save,
@@ -46,6 +47,7 @@ import {
 import { CATEGORY_CODE_MAX_LENGTH, IDENTIFICATION_MAX_LENGTH } from './services/validation'
 import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
+import { getQrPrintMetrics } from './services/qrPrintMetrics'
 
 const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
 
@@ -74,6 +76,9 @@ const entityDialog = ref(false)
 const qrDialog = ref(false)
 const qrEntity = ref(null)
 const qrImageUrl = ref('')
+const printDialog = ref(false)
+const printEntity = ref(null)
+const printSettings = ref(defaultPrintSettings())
 const categoryDraft = ref(emptyCategory())
 const suggestionDraft = ref(emptySuggestion())
 const entityDraft = ref(emptyEntity())
@@ -83,6 +88,10 @@ const activeCategories = computed(() => categories.value.filter((category) => ca
 const selectedCategory = computed(() =>
   categories.value.find((category) => category.id === Number(selectedCategoryId.value)),
 )
+const printMetrics = computed(() => {
+  if (!printEntity.value) return null
+  return getQrPrintMetrics(buildEntityUrl(printEntity.value), printSettings.value)
+})
 const pageTitle = computed(
   () =>
     ({
@@ -278,11 +287,11 @@ async function submitEntity() {
     if (isEditing) {
       await updateEntity(entityDraft.value)
     } else {
-      const token = await createEntity(entityDraft.value)
+      const access = await createEntity(entityDraft.value)
       const category = categories.value.find(
         (item) => item.id === Number(entityDraft.value.categoryId),
       )
-      createdUrl = buildUrl(category?.code, token)
+      createdUrl = buildUrl(category?.code, access.shortCode, true)
     }
     entityDialog.value = false
     await loadEntities()
@@ -294,8 +303,9 @@ async function submitEntity() {
 async function regenerateToken(entity) {
   if (!window.confirm('La URL actual dejará de funcionar. ¿Generar un token nuevo?')) return
   await runAction(async () => {
-    const token = await regenerateEntityToken(entity.id)
-    entity.token = token
+    const access = await regenerateEntityToken(entity.id)
+    entity.token = access.token
+    entity.shortCode = access.shortCode
     notifySuccess('Token y URL regenerados.')
   })
 }
@@ -327,19 +337,49 @@ async function openQr(entity) {
   })
 }
 
-async function downloadQr(entity) {
+function openPrintDialog(entity) {
+  printEntity.value = entity
+  printSettings.value = defaultPrintSettings()
+  printDialog.value = true
+  qrDialog.value = false
+}
+
+async function downloadPrintSvg() {
+  if (!printEntity.value || !printMetrics.value?.isPrintable) return
   await runAction(async () => {
-    const svg = await generateQrSvg(entity)
-    const blobUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = blobUrl
-    link.download = `qr-${safeFileName(entity.identification)}.svg`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+    const svg = createSlicerQrSvg(buildEntityUrl(printEntity.value), {
+      sizeMm: printSettings.value.qrSizeMm,
+    })
+    downloadBlob(
+      new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+      `qr-${safeFileName(printEntity.value.identification)}-${printSettings.value.qrSizeMm}mm.svg`,
+    )
     notifySuccess('QR descargado como SVG compatible con laminadores.')
   })
+}
+
+async function downloadPrintStl() {
+  if (!printEntity.value || !printMetrics.value?.isPrintable) return
+  await runAction(async () => {
+    const { createPrintableQrStl } = await import('./services/print3d')
+    const stl = createPrintableQrStl(buildEntityUrl(printEntity.value), printSettings.value)
+    downloadBlob(
+      new Blob([stl], { type: 'model/stl' }),
+      `${printSettings.value.format}-${safeFileName(printEntity.value.identification)}.stl`,
+    )
+    notifySuccess('Modelo STL generado y descargado.')
+  })
+}
+
+function downloadBlob(blob, fileName) {
+  const blobUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
 }
 
 async function generateQrImage(entity) {
@@ -349,10 +389,6 @@ async function generateQrImage(entity) {
     errorCorrectionLevel: 'H',
     color: { dark: '#071045', light: '#ffffff' },
   })
-}
-
-async function generateQrSvg(entity) {
-  return createSlicerQrSvg(buildEntityUrl(entity))
 }
 
 async function submitPasswordChange() {
@@ -423,10 +459,15 @@ function friendlyError(error) {
 }
 
 function buildEntityUrl(entity) {
-  return buildUrl(entity.categoryCode, entity.token)
+  return buildUrl(
+    entity.categoryCode,
+    entity.shortCode || entity.token,
+    Boolean(entity.shortCode),
+  )
 }
 
-function buildUrl(categoryCode, token) {
+function buildUrl(categoryCode, token, isShortCode = false) {
+  if (isShortCode) return `${PUBLIC_ORIGIN}/${token}`
   return `${PUBLIC_ORIGIN}/${categoryCode || 'CATEGORIA'}/${token}`
 }
 
@@ -448,7 +489,17 @@ function emptySuggestion(categoryId = null, sortOrder = 10) {
 }
 
 function emptyEntity(categoryId = null) {
-  return { id: null, identification: '', categoryId, token: '' }
+  return { id: null, identification: '', categoryId, token: '', shortCode: '' }
+}
+
+function defaultPrintSettings() {
+  return {
+    format: 'plate',
+    qrSizeMm: 60,
+    nozzleMm: 0.4,
+    baseHeightMm: 2,
+    reliefHeightMm: 0.8,
+  }
 }
 
 function emptyPagination() {
@@ -648,7 +699,7 @@ function emptyPagination() {
             <div class="section-toolbar">
               <div>
                 <h2>Entidades y URLs</h2>
-                <p>Cada entidad recibe un token GUID único.</p>
+                <p>Cada entidad conserva un GUID interno y recibe una URL pública corta.</p>
               </div>
               <v-btn :disabled="!categories.length" color="primary" variant="flat" @click="openEntityDialog()">
                 <Plus :size="19" /> Nueva entidad
@@ -666,7 +717,7 @@ function emptyPagination() {
               </label>
               <label class="filter-field search-field">
                 <span>Buscar</span>
-                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Identificación o token" /></div>
+                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Identificación o código" /></div>
               </label>
               <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Filtrar</v-btn>
             </form>
@@ -685,10 +736,10 @@ function emptyPagination() {
                 </div>
                 <div class="action-cell entity-actions">
                   <button type="button" title="Ver código QR" @click="openQr(entity)"><QrCodeIcon :size="18" /></button>
-                  <button type="button" title="Descargar QR para impresión 3D" @click="downloadQr(entity)"><Download :size="18" /></button>
+                  <button type="button" title="Preparar impresión 3D" @click="openPrintDialog(entity)"><Printer :size="18" /></button>
                   <button type="button" title="Copiar URL" @click="copyUrl(entity)"><Copy :size="18" /></button>
                   <button type="button" title="Editar" @click="openEntityDialog(entity)"><Pencil :size="18" /></button>
-                  <button type="button" title="Regenerar token" @click="regenerateToken(entity)"><RefreshCw :size="18" /></button>
+                  <button type="button" title="Regenerar acceso y URL" @click="regenerateToken(entity)"><RefreshCw :size="18" /></button>
                   <button type="button" class="danger" title="Eliminar" @click="removeEntity(entity)"><Trash2 :size="18" /></button>
                 </div>
               </article>
@@ -756,8 +807,8 @@ function emptyPagination() {
         <form @submit.prevent="submitEntity">
           <label class="field"><span>Identificación</span><input v-model="entityDraft.identification" :maxlength="IDENTIFICATION_MAX_LENGTH" placeholder="Ej. ABC-123" /></label>
           <label class="field"><span>Categoría</span><select v-model="entityDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
-          <div v-if="!entityDraft.id" class="guid-preview"><KeyRound :size="19" /><p><strong>Token GUID automático</strong><span>Se generará al guardar la entidad.</span></p></div>
-          <div v-else class="url-preview"><span>URL actual</span><code>{{ buildUrl(categories.find((item) => item.id === Number(entityDraft.categoryId))?.code, entityDraft.token) }}</code></div>
+          <div v-if="!entityDraft.id" class="guid-preview"><KeyRound :size="19" /><p><strong>Acceso seguro automático</strong><span>Se generará un GUID interno y un código corto para la URL.</span></p></div>
+          <div v-else class="url-preview"><span>URL actual</span><code>{{ buildUrl(categories.find((item) => item.id === Number(entityDraft.categoryId))?.code, entityDraft.shortCode || entityDraft.token, Boolean(entityDraft.shortCode)) }}</code></div>
           <div class="dialog-actions"><v-btn variant="text" @click="entityDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
         </form>
       </v-card>
@@ -775,9 +826,96 @@ function emptyPagination() {
             <strong>{{ qrEntity.identification }}</strong>
             <a :href="buildEntityUrl(qrEntity)" target="_blank">{{ buildEntityUrl(qrEntity) }}</a>
           </div>
-          <v-btn color="primary" variant="flat" @click="downloadQr(qrEntity)">
-            <Download :size="18" /> Descargar SVG para impresión 3D
+          <v-btn color="primary" variant="flat" @click="openPrintDialog(qrEntity)">
+            <Printer :size="18" /> Preparar impresión 3D
           </v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="printDialog" max-width="760">
+      <v-card class="admin-dialog print-dialog">
+        <div class="dialog-header">
+          <div><Printer :size="21" /><h2>Preparar impresión 3D</h2></div>
+          <button type="button" aria-label="Cerrar" @click="printDialog = false"><X :size="21" /></button>
+        </div>
+        <div v-if="printEntity && printMetrics" class="print-content">
+          <div class="print-summary">
+            <div>
+              <span>Entidad</span>
+              <strong>{{ printEntity.identification }}</strong>
+            </div>
+            <div>
+              <span>URL corta</span>
+              <code>{{ buildEntityUrl(printEntity) }}</code>
+            </div>
+          </div>
+
+          <div class="print-controls">
+            <label class="field">
+              <span>Formato</span>
+              <select v-model="printSettings.format">
+                <option value="plate">Placa</option>
+                <option value="keychain">Llavero con orificio</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Tamaño del QR</span>
+              <select v-model.number="printSettings.qrSizeMm">
+                <option :value="50">50 mm</option>
+                <option :value="60">60 mm</option>
+                <option :value="80">80 mm</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Boquilla</span>
+              <select v-model.number="printSettings.nozzleMm">
+                <option :value="0.4">0.4 mm</option>
+                <option :value="0.6">0.6 mm</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Grosor de la base</span>
+              <select v-model.number="printSettings.baseHeightMm">
+                <option :value="1.6">1.6 mm</option>
+                <option :value="2">2.0 mm</option>
+                <option :value="2.4">2.4 mm</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Altura del relieve</span>
+              <select v-model.number="printSettings.reliefHeightMm">
+                <option :value="0.6">0.6 mm</option>
+                <option :value="0.8">0.8 mm</option>
+                <option :value="1.2">1.2 mm</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="print-metrics" :class="{ 'print-metrics--warning': !printMetrics.isPrintable }">
+            <Printer :size="22" />
+            <div>
+              <strong>{{ printMetrics.isPrintable ? 'Configuración lista para imprimir' : 'Módulos demasiado pequeños' }}</strong>
+              <span>
+                {{ printMetrics.modelWidthMm.toFixed(1) }} × {{ printMetrics.modelHeightMm.toFixed(1) }} mm ·
+                módulo {{ printMetrics.moduleSizeMm.toFixed(2) }} mm ·
+                recomendado {{ printMetrics.recommendedModuleMm.toFixed(2) }} mm o más
+              </span>
+            </div>
+          </div>
+
+          <p class="print-note">
+            El modelo STL incluye una base y el QR en relieve. Para dos colores, programa un cambio de filamento al comenzar el relieve.
+          </p>
+
+          <div class="print-actions">
+            <v-btn variant="tonal" :disabled="!printMetrics.isPrintable || isSaving" @click="downloadPrintSvg">
+              <Download :size="18" /> Descargar SVG
+            </v-btn>
+            <v-btn color="primary" variant="flat" :disabled="!printMetrics.isPrintable" :loading="isSaving" @click="downloadPrintStl">
+              <Download :size="18" /> Descargar STL
+            </v-btn>
+          </div>
         </div>
       </v-card>
     </v-dialog>
@@ -908,6 +1046,20 @@ button { letter-spacing: 0; }
 .qr-content a { max-width: 100%; color: #096bdc; font-size: .84rem; overflow-wrap: anywhere; }
 .qr-content :deep(.v-btn) { text-transform: none; font-weight: 700; letter-spacing: 0; }
 .qr-content :deep(.v-btn__content) { gap: 8px; }
+.print-content { display: grid; gap: 20px; padding: 22px; }
+.print-summary { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1fr); gap: 14px; padding: 14px; background: #f4f7fa; border: 1px solid #dce5ef; border-radius: 7px; }
+.print-summary > div { display: grid; gap: 4px; min-width: 0; }
+.print-summary span { color: #68778c; font-size: .76rem; font-weight: 750; text-transform: uppercase; }
+.print-summary code { overflow: hidden; color: #174b88; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+.print-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.print-metrics { display: flex; align-items: flex-start; gap: 12px; padding: 14px; color: #166b51; background: #eaf8f2; border: 1px solid #c7eadc; border-radius: 7px; }
+.print-metrics--warning { color: #9a5b0c; background: #fff7e8; border-color: #f3d49f; }
+.print-metrics > div { display: grid; gap: 3px; }
+.print-metrics span { font-size: .84rem; line-height: 1.4; }
+.print-note { margin: 0; color: #617189; font-size: .86rem; line-height: 1.45; }
+.print-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.print-actions :deep(.v-btn) { text-transform: none; font-weight: 700; letter-spacing: 0; }
+.print-actions :deep(.v-btn__content) { gap: 8px; }
 .sidebar-backdrop { display: none; }
 
 @media (max-width: 980px) {
@@ -927,6 +1079,9 @@ button { letter-spacing: 0; }
   .session-badge { width: 38px; height: 38px; padding: 0; justify-content: center; }
   .session-badge { font-size: 0; }
   .admin-content { padding: 22px 14px 46px; }
+  .print-content { padding: 16px; }
+  .print-summary, .print-controls { grid-template-columns: 1fr; }
+  .print-actions { display: grid; }
   .section-toolbar { flex-direction: column; align-items: stretch; gap: 14px; }
   .section-toolbar :deep(.v-btn) { width: 100%; min-width: 42px; padding: 0 12px; }
   .category-grid, .suggestion-grid { grid-template-columns: 1fr auto; }

@@ -1,5 +1,6 @@
 import { getTursoClient } from './tursoClient'
 import { normalizeDataType } from './dataTypes'
+import { generateShortCode } from './shortCode'
 import {
   CATEGORY_CODE_MAX_LENGTH,
   IDENTIFICATION_MAX_LENGTH,
@@ -219,9 +220,9 @@ export async function listEntities({
   }
   const safeSearch = sanitizeText(search)
   if (safeSearch) {
-    clauses.push('(e.Identificacion LIKE ? OR e.token LIKE ?)')
+    clauses.push('(e.Identificacion LIKE ? OR e.token LIKE ? OR e.short_code LIKE ?)')
     const pattern = `%${safeSearch.slice(0, IDENTIFICATION_MAX_LENGTH)}%`
-    args.push(pattern, pattern)
+    args.push(pattern, pattern, pattern)
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
@@ -233,7 +234,7 @@ export async function listEntities({
     pageSize,
   )
   const result = await db.execute({
-    sql: `SELECT e.id, e.Identificacion AS identificacion, e.token,
+    sql: `SELECT e.id, e.Identificacion AS identificacion, e.token, e.short_code,
                  e.categoriaID, c.name AS category_name, c.code AS category_code
           FROM Entidades e
           INNER JOIN Categorias c ON c.id = e.categoriaID
@@ -255,14 +256,15 @@ export async function createEntity(payload) {
   )
   const categoryId = validateId(payload.categoryId, 'categoría')
   const token = crypto.randomUUID()
+  const shortCode = generateShortCode()
 
   await db.execute({
-    sql: `INSERT INTO Entidades (Identificacion, token, categoriaID, custom_data)
-          VALUES (?, ?, ?, '[]')`,
-    args: [identification, token, categoryId],
+    sql: `INSERT INTO Entidades (Identificacion, token, short_code, categoriaID, custom_data)
+          VALUES (?, ?, ?, ?, '[]')`,
+    args: [identification, token, shortCode, categoryId],
   })
 
-  return token
+  return { token, shortCode }
 }
 
 export async function updateEntity(payload) {
@@ -285,8 +287,12 @@ export async function regenerateEntityToken(entityId) {
   const db = getTursoClient()
   const id = validateId(entityId, 'entidad')
   const token = crypto.randomUUID()
-  await db.execute({ sql: 'UPDATE Entidades SET token = ? WHERE id = ?', args: [token, id] })
-  return token
+  const shortCode = generateShortCode()
+  await db.execute({
+    sql: 'UPDATE Entidades SET token = ?, short_code = ? WHERE id = ?',
+    args: [token, shortCode, id],
+  })
+  return { token, shortCode }
 }
 
 export async function deleteEntity(entityId) {
@@ -397,6 +403,7 @@ function mapEntity(row) {
     id: Number(row.id),
     identification: String(row.identificacion),
     token: String(row.token),
+    shortCode: String(row.short_code || ''),
     categoryId: Number(row.categoriaID),
     categoryName: String(row.category_name),
     categoryCode: String(row.category_code),

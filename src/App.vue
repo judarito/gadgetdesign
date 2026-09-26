@@ -117,7 +117,7 @@ onMounted(loadEntity)
 
 async function loadEntity() {
   if (!routeContext.isValid) {
-    errorMessage.value = 'Abre una URL con el formato /codigo-categoria/token.'
+    errorMessage.value = 'Abre una URL válida de Gadget Design.'
     return
   }
 

@@ -53,6 +53,43 @@ await db.execute(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_categoria_token ON Entidades (categoriaID, token)',
 )
 
+const entityColumns = await db.execute('PRAGMA table_info(Entidades)')
+const hasShortCode = entityColumns.rows.some((column) => column.name === 'short_code')
+
+if (!hasShortCode) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN short_code TEXT')
+}
+
+const entitiesWithoutShortCode = await db.execute(
+  "SELECT id FROM Entidades WHERE short_code IS NULL OR TRIM(short_code) = ''",
+)
+
+for (const entity of entitiesWithoutShortCode.rows) {
+  let shortCode
+  let exists = true
+
+  while (exists) {
+    shortCode = randomBytes(9).toString('base64url')
+    const duplicate = await db.execute({
+      sql: 'SELECT 1 FROM Entidades WHERE short_code = ? LIMIT 1',
+      args: [shortCode],
+    })
+    exists = duplicate.rows.length > 0
+  }
+
+  await db.execute({
+    sql: 'UPDATE Entidades SET short_code = ? WHERE id = ?',
+    args: [shortCode, entity.id],
+  })
+}
+
+await db.execute(
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_categoria_short_code ON Entidades (categoriaID, short_code)',
+)
+await db.execute(
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_short_code ON Entidades (short_code)',
+)
+
 const existing = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1 LIMIT 1')
 
 if (existing.rows.length) {
