@@ -74,6 +74,7 @@ export async function updateCustomData(categoryCode, token, itemId, payload) {
           ...item,
           key: safePayload.key,
           value: safePayload.value,
+          dataType: safePayload.dataType,
         }
       : item,
   )
@@ -157,7 +158,7 @@ async function getEntityByToken(db, categoryId, token) {
 
 async function getSuggestionsByCategory(db, categoryId) {
   const result = await db.execute({
-    sql: `SELECT id, name
+    sql: `SELECT id, name, data_type
           FROM CategoriaSugerencias
           WHERE categoriaID = ? AND active = 1
           ORDER BY sort_order, id
@@ -168,5 +169,6 @@ async function getSuggestionsByCategory(db, categoryId) {
   return result.rows.map((row) => ({
     id: row.id,
     key: row.name,
+    dataType: row.data_type,
   }))
 }

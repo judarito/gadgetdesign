@@ -35,13 +35,15 @@ export function serializeCustomData(items) {
   return serialized
 }
 
-export function createCustomDataItem({ key, value }) {
-  const sanitizedPayload = sanitizeCustomDataInput({ key, value })
+export function createCustomDataItem({ key, value, dataType, suggestionId }) {
+  const sanitizedPayload = sanitizeCustomDataInput({ key, value, dataType })
 
   return normalizeItem({
     id: crypto.randomUUID(),
     key: sanitizedPayload.key,
     value: sanitizedPayload.value,
+    dataType: sanitizedPayload.dataType,
+    suggestionId: normalizeSuggestionId(suggestionId),
   })
 }
 
@@ -50,11 +52,20 @@ function normalizeItem(item, index = 0) {
   const sanitized = sanitizeCustomDataInput({
     key: item.key || item.label || fallbackKey,
     value: item.value,
+    dataType: item.dataType,
   })
 
   return {
     id: sanitizeText(item.id || crypto.randomUUID()),
     key: sanitized.key,
     value: sanitized.value,
+    dataType: sanitized.dataType,
+    suggestionId: normalizeSuggestionId(item.suggestionId),
   }
+}
+
+function normalizeSuggestionId(value) {
+  if (value === null || value === undefined || value === '') return null
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
 }

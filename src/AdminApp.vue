@@ -45,6 +45,7 @@ import {
   verifyAdminPassword,
 } from './services/adminApi'
 import { CATEGORY_CODE_MAX_LENGTH, IDENTIFICATION_MAX_LENGTH } from './services/validation'
+import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 
 const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
 
@@ -440,7 +441,7 @@ function emptyCategory() {
 }
 
 function emptySuggestion(categoryId = null, sortOrder = 10) {
-  return { id: null, categoryId, name: '', active: true, sortOrder }
+  return { id: null, categoryId, name: '', active: true, sortOrder, dataType: 'text' }
 }
 
 function emptyEntity(categoryId = null) {
@@ -613,13 +614,14 @@ function emptyPagination() {
             </label>
 
             <div class="data-table">
-              <div class="table-head suggestion-grid"><span>Sugerencia</span><span>Orden</span><span>Estado</span><span /></div>
+              <div class="table-head suggestion-grid"><span>Sugerencia</span><span>Formato</span><span>Orden</span><span>Estado</span><span /></div>
               <div v-if="isLoading" class="table-empty">Cargando sugerencias...</div>
               <div v-else-if="!suggestions.length" class="table-empty">
                 {{ selectedCategory ? `No hay sugerencias para ${selectedCategory.name}.` : 'Selecciona una categoría.' }}
               </div>
               <div v-for="suggestion in suggestions" :key="suggestion.id" class="table-row suggestion-grid">
                 <div class="primary-cell"><span class="cell-icon"><Lightbulb :size="18" /></span><strong>{{ suggestion.name }}</strong></div>
+                <span>{{ getDataType(suggestion.dataType).label }}</span>
                 <span>{{ suggestion.sortOrder }}</span>
                 <span class="status-pill" :class="{ 'status-pill--off': !suggestion.active }">
                   {{ suggestion.active ? 'Activa' : 'Inactiva' }}
@@ -738,6 +740,7 @@ function emptyPagination() {
         <div class="dialog-header"><div><Lightbulb :size="21" /><h2>{{ suggestionDraft.id ? 'Editar sugerencia' : 'Nueva sugerencia' }}</h2></div><button type="button" @click="suggestionDialog = false"><X :size="21" /></button></div>
         <form @submit.prevent="submitSuggestion">
           <label class="field"><span>Dato sugerido</span><input v-model="suggestionDraft.name" maxlength="50" placeholder="Ej. Vencimiento SOAT" /></label>
+          <label class="field"><span>Tipo de información</span><select v-model="suggestionDraft.dataType"><option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">{{ type.label }}</option></select></label>
           <label class="field"><span>Orden</span><input v-model.number="suggestionDraft.sortOrder" min="0" max="9999" type="number" /></label>
           <label class="switch-field"><input v-model="suggestionDraft.active" type="checkbox" /><span><strong>Sugerencia activa</strong><small>Visible para entidades sin datos.</small></span></label>
           <div class="dialog-actions"><v-btn variant="text" @click="suggestionDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
@@ -831,7 +834,7 @@ button { letter-spacing: 0; }
 .table-row { min-height: 66px; color: #4e5d73; border-bottom: 1px solid #e5ebf2; }
 .table-row:last-child { border-bottom: 0; }
 .category-grid { grid-template-columns: minmax(170px, 1.2fr) minmax(90px, .55fr) minmax(180px, 1fr) 90px 88px; }
-.suggestion-grid { grid-template-columns: minmax(210px, 1fr) 90px 100px 88px; }
+.suggestion-grid { grid-template-columns: minmax(210px, 1fr) 150px 80px 100px 88px; }
 .primary-cell { display: flex; align-items: center; gap: 10px; min-width: 0; color: #172033; }
 .primary-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; color: #0873ff; background: #edf6ff; border-radius: 6px; }
@@ -918,10 +921,11 @@ button { letter-spacing: 0; }
   .table-row.category-grid > :nth-child(2) { display: block; grid-column: 1; grid-row: 2; margin-left: 44px; }
   .table-row.category-grid > :nth-child(3) { display: block; grid-column: 1; grid-row: 3; margin-left: 44px; font-size: .82rem; }
   .table-row.category-grid > :nth-child(4) { display: block; grid-column: 1; grid-row: 4; margin: 2px 0 0 44px; }
-  .table-row.category-grid > :nth-child(5), .table-row.suggestion-grid > :nth-child(4) { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
+  .table-row.category-grid > :nth-child(5), .table-row.suggestion-grid > :nth-child(5) { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
   .table-row.suggestion-grid > :nth-child(2) { display: block; grid-column: 1; grid-row: 2; margin-left: 44px; color: #748298; font-size: .82rem; }
-  .table-row.suggestion-grid > :nth-child(2)::before { content: "Orden: "; }
-  .table-row.suggestion-grid > :nth-child(3) { display: block; grid-column: 1; grid-row: 3; margin: 2px 0 0 44px; }
+  .table-row.suggestion-grid > :nth-child(3) { display: block; grid-column: 1; grid-row: 3; margin-left: 44px; color: #748298; font-size: .82rem; }
+  .table-row.suggestion-grid > :nth-child(3)::before { content: "Orden: "; }
+  .table-row.suggestion-grid > :nth-child(4) { display: block; grid-column: 1; grid-row: 4; margin: 2px 0 0 44px; }
   .entity-filters { grid-template-columns: 1fr; }
   .filter-button { width: 100%; }
   .entity-row { grid-template-columns: 1fr; gap: 11px; }

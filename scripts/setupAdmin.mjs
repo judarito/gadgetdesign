@@ -20,6 +20,35 @@ await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`)
 
+await db.execute(`CREATE TABLE IF NOT EXISTS CategoriaSugerencias (
+  id INTEGER PRIMARY KEY,
+  categoriaID INTEGER NOT NULL,
+  name TEXT(50) NOT NULL,
+  active NUMERIC NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  data_type TEXT NOT NULL DEFAULT 'text',
+  CONSTRAINT constraint_CategoriaSugerencias_Cat
+    FOREIGN KEY (categoriaID) REFERENCES Categorias (id),
+  CONSTRAINT unique_CategoriaSugerencias_name
+    UNIQUE (categoriaID, name)
+)`)
+
+const suggestionColumns = await db.execute('PRAGMA table_info(CategoriaSugerencias)')
+const hasDataType = suggestionColumns.rows.some((column) => column.name === 'data_type')
+
+if (!hasDataType) {
+  await db.execute(
+    "ALTER TABLE CategoriaSugerencias ADD COLUMN data_type TEXT NOT NULL DEFAULT 'text'",
+  )
+  await db.execute({
+    sql: `UPDATE CategoriaSugerencias
+          SET data_type = 'date'
+          WHERE categoriaID = (SELECT id FROM Categorias WHERE code = 'VEH' LIMIT 1)
+            AND name IN (?, ?)`,
+    args: ['Vencimiento SOAT', 'Vencimiento tecnomecanica'],
+  })
+}
+
 await db.execute(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_categoria_token ON Entidades (categoriaID, token)',
 )

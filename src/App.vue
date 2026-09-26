@@ -12,6 +12,7 @@ import {
   CUSTOM_DATA_KEY_MAX_LENGTH,
   IDENTIFICATION_MAX_LENGTH,
 } from './services/validation'
+import { CUSTOM_DATA_TYPES, formatCustomDataValue, getDataType } from './services/dataTypes'
 
 const routeContext = getRouteContext()
 const category = ref(null)
@@ -20,10 +21,12 @@ const customData = ref([])
 const suggestions = ref([])
 const savedDrafts = ref([])
 const suggestionDrafts = ref([])
-const newDraft = ref({ key: '', value: '' })
+const selectedSuggestionId = ref(null)
+const newDraft = ref({ key: '', value: '', dataType: 'text' })
 const isLoading = ref(false)
 const isSaving = ref(false)
 const savingKey = ref(null)
+const editingId = ref(null)
 const errorMessage = ref('')
 
 const canUseCrud = computed(() => routeContext.isValid && !isLoading.value && !isSaving.value)
@@ -34,8 +37,9 @@ const helperText = computed(() => {
 
   return `${customData.value.length}/${CUSTOM_DATA_LIMIT} datos guardados.`
 })
-const showSuggestions = computed(
-  () => customData.value.length === 0 && suggestionDrafts.value.length > 0,
+const showSuggestions = computed(() => suggestionDrafts.value.length > 0)
+const selectedSuggestion = computed(() =>
+  suggestionDrafts.value.find((draft) => draft.id === selectedSuggestionId.value),
 )
 
 const paths = {
@@ -68,6 +72,11 @@ const paths = {
     'M20 22h32M27 22v30h18V22M29 22l2-8h10l2 8',
     'M32 30v14M40 30v14',
   ],
+  edit: [
+    'M14 47.5 17.5 36 43 10.5a5.7 5.7 0 0 1 8 8L25.5 44 14 47.5Z',
+    'M37 16.5 44.5 24',
+  ],
+  close: ['M18 18 46 46', 'M46 18 18 46'],
   save: ['M16 10h29l8 8v36H11V10h5Z', 'M20 10v15h24V10M20 54V36h24v18'],
 }
 
@@ -124,9 +133,29 @@ async function saveNewDraft(draft, requestKey) {
       await createCustomData(routeContext.categoryCode, routeContext.token, {
         key: draft.key,
         value: draft.value,
+        dataType: draft.dataType,
+        suggestionId: draft.suggestionId,
       }),
     )
   }, false, requestKey)
+}
+
+function selectSuggestion(draft) {
+  if (!canUseCrud.value) return
+  if (selectedSuggestionId.value !== draft.id) resetSelectedSuggestion()
+  selectedSuggestionId.value = draft.id
+}
+
+function closeSuggestionEditor() {
+  resetSelectedSuggestion()
+  selectedSuggestionId.value = null
+}
+
+function resetSelectedSuggestion() {
+  const draft = selectedSuggestion.value
+  const source = suggestions.value.find((suggestion) => suggestion.id === draft?.id)
+  if (!draft || !source) return
+  Object.assign(draft, source, { suggestionId: Number(source.id), value: '' })
 }
 
 async function saveExistingDraft(draft) {
@@ -137,9 +166,27 @@ async function saveExistingDraft(draft) {
       await updateCustomData(routeContext.categoryCode, routeContext.token, draft.id, {
         key: draft.key,
         value: draft.value,
+        dataType: draft.dataType,
       }),
     )
   }, false, `saved-${draft.id}`)
+}
+
+function startEdit(draft) {
+  restoreDraft(editingId.value)
+  editingId.value = draft.id
+}
+
+function cancelEdit(draft) {
+  restoreDraft(draft.id)
+  editingId.value = null
+}
+
+function restoreDraft(itemId) {
+  if (!itemId) return
+  const source = customData.value.find((item) => item.id === itemId)
+  const draft = savedDrafts.value.find((item) => item.id === itemId)
+  if (source && draft) Object.assign(draft, source)
 }
 
 async function removeCustomData(item) {
@@ -156,11 +203,23 @@ function applyContext(context) {
   customData.value = context.entity?.customData || []
   suggestions.value = context.suggestions || []
   savedDrafts.value = customData.value.map((item) => ({ ...item }))
-  suggestionDrafts.value =
-    customData.value.length === 0
-      ? suggestions.value.map((suggestion) => ({ ...suggestion, value: '' }))
-      : []
-  newDraft.value = { key: '', value: '' }
+  editingId.value = null
+  const usedSuggestionIds = new Set(
+    customData.value.map((item) => item.suggestionId).filter(Boolean),
+  )
+  suggestionDrafts.value = suggestions.value
+    .filter(
+      (suggestion) =>
+        !usedSuggestionIds.has(Number(suggestion.id)) &&
+        !customData.value.some((item) => isEquivalentKey(suggestion.key, item.key)),
+    )
+    .map((suggestion) => ({
+      ...suggestion,
+      suggestionId: Number(suggestion.id),
+      value: '',
+    }))
+  selectedSuggestionId.value = null
+  newDraft.value = { key: '', value: '', dataType: 'text' }
 }
 
 async function runRequest(callback, initialLoad = false, requestKey = null) {
@@ -189,6 +248,38 @@ function getIconForKey(key) {
   if (normalizedKey.includes('propietario') || normalizedKey.includes('persona')) return 'user'
 
   return 'file'
+}
+
+function normalizeKey(value) {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('es')
+}
+
+function isEquivalentKey(suggestionKey, savedKey) {
+  const normalizedSuggestion = normalizeKey(suggestionKey)
+  const normalizedSaved = normalizeKey(savedKey)
+  if (normalizedSuggestion === normalizedSaved) return true
+
+  const suggestionTokens = getComparableTokens(normalizedSuggestion)
+  const savedTokens = getComparableTokens(normalizedSaved)
+  if (!suggestionTokens.length || !savedTokens.length) return false
+
+  return (
+    savedTokens.length >= suggestionTokens.length - 1 &&
+    savedTokens.every((token) => suggestionTokens.includes(token))
+  )
+}
+
+function getComparableTokens(value) {
+  const ignoredWords = new Set(['de', 'del', 'el', 'la', 'los', 'las', 'y', 'para'])
+
+  return value
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word && !ignoredWords.has(word))
+    .map((word) => (word.length >= 5 ? word.slice(0, 4) : word))
 }
 </script>
 
@@ -260,17 +351,32 @@ function getIconForKey(key) {
             </div>
 
             <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
-              <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
+              <div class="suggestions-heading">
+                <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
+                <p>Selecciona una para agregarla.</p>
+              </div>
+              <div class="suggestion-options" aria-label="Sugerencias disponibles">
+                <button
+                  v-for="draft in suggestionDrafts"
+                  :key="draft.id"
+                  class="suggestion-option"
+                  :class="{ 'suggestion-option--selected': selectedSuggestionId === draft.id }"
+                  :disabled="!canUseCrud"
+                  type="button"
+                  @click="selectSuggestion(draft)"
+                >
+                  {{ draft.key }}
+                </button>
+              </div>
               <form
-                v-for="draft in suggestionDrafts"
-                :key="draft.id"
+                v-if="selectedSuggestion"
                 class="inline-row inline-row--suggestion"
-                @submit.prevent="saveNewDraft(draft, `suggestion-${draft.id}`)"
+                @submit.prevent="saveNewDraft(selectedSuggestion, `suggestion-${selectedSuggestion.id}`)"
               >
                 <label>
-                  <span>Dato</span>
+                  <span>Dato <small>{{ getDataType(selectedSuggestion.dataType).label }}</small></span>
                   <input
-                    v-model="draft.key"
+                    v-model="selectedSuggestion.key"
                     :disabled="!canUseCrud"
                     :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
                     aria-label="Dato sugerido"
@@ -279,24 +385,38 @@ function getIconForKey(key) {
                 <label>
                   <span>Valor</span>
                   <input
-                    v-model="draft.value"
+                    v-model="selectedSuggestion.value"
+                    :type="getDataType(selectedSuggestion.dataType).inputType"
                     :disabled="!canUseCrud"
                     :maxlength="IDENTIFICATION_MAX_LENGTH"
-                    placeholder="Escribe el valor"
+                    :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
                     aria-label="Valor del dato sugerido"
                   />
                 </label>
-                <v-btn
-                  class="save-button"
-                  color="primary"
-                  :disabled="!canUseCrud || !draft.key.trim() || !draft.value.trim()"
-                  :loading="savingKey === `suggestion-${draft.id}`"
-                  type="submit"
-                  variant="flat"
-                >
-                  <AppIcon name="save" />
-                  Guardar
-                </v-btn>
+                <div class="suggestion-actions">
+                  <v-btn
+                    class="save-button"
+                    color="primary"
+                    :disabled="!canUseCrud || !selectedSuggestion.key.trim() || !selectedSuggestion.value.trim()"
+                    :loading="savingKey === `suggestion-${selectedSuggestion.id}`"
+                    type="submit"
+                    variant="flat"
+                  >
+                    <AppIcon name="save" />
+                    Guardar
+                  </v-btn>
+                  <v-btn
+                    class="cancel-button"
+                    icon
+                    :disabled="!canUseCrud"
+                    type="button"
+                    variant="flat"
+                    aria-label="Cerrar sugerencia"
+                    @click="closeSuggestionEditor"
+                  >
+                    <AppIcon name="close" />
+                  </v-btn>
+                </div>
               </form>
             </section>
 
@@ -310,26 +430,58 @@ function getIconForKey(key) {
                 <span class="row-icon" aria-hidden="true">
                   <AppIcon :name="getIconForKey(draft.key)" />
                 </span>
-                <label>
-                  <span>Dato</span>
-                  <input
-                    v-model="draft.key"
-                    :disabled="!canUseCrud"
-                    :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
-                    aria-label="Dato personalizado"
-                  />
-                </label>
-                <label>
-                  <span>Valor</span>
-                  <input
-                    v-model="draft.value"
-                    :disabled="!canUseCrud"
-                    :maxlength="IDENTIFICATION_MAX_LENGTH"
-                    aria-label="Valor personalizado"
-                  />
-                </label>
+                <template v-if="editingId === draft.id">
+                  <label>
+                    <span>Dato</span>
+                    <input
+                      v-model="draft.key"
+                      :disabled="!canUseCrud"
+                      :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
+                      aria-label="Dato personalizado"
+                    />
+                  </label>
+                  <label>
+                    <span>Tipo de información</span>
+                    <select v-model="draft.dataType" :disabled="!canUseCrud" aria-label="Formato del dato">
+                      <option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">
+                        {{ type.label }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Valor</span>
+                    <input
+                      v-model="draft.value"
+                      :type="getDataType(draft.dataType).inputType"
+                      :disabled="!canUseCrud"
+                      :maxlength="IDENTIFICATION_MAX_LENGTH"
+                      :placeholder="getDataType(draft.dataType).placeholder"
+                      aria-label="Valor personalizado"
+                    />
+                  </label>
+                </template>
+                <template v-else>
+                  <span class="row-key">
+                    <span>{{ draft.key }}</span>
+                    <small>{{ getDataType(draft.dataType).label }}</small>
+                  </span>
+                  <strong class="row-value">{{ formatCustomDataValue(draft.value, draft.dataType) }}</strong>
+                </template>
                 <div class="row-actions">
                   <v-btn
+                    v-if="editingId !== draft.id"
+                    class="edit-button"
+                    icon
+                    :disabled="!canUseCrud"
+                    type="button"
+                    variant="flat"
+                    aria-label="Editar"
+                    @click="startEdit(draft)"
+                  >
+                    <AppIcon name="edit" />
+                  </v-btn>
+                  <v-btn
+                    v-if="editingId === draft.id"
                     class="save-icon-button"
                     icon
                     :disabled="!canUseCrud || !draft.key.trim() || !draft.value.trim()"
@@ -341,6 +493,19 @@ function getIconForKey(key) {
                     <AppIcon name="save" />
                   </v-btn>
                   <v-btn
+                    v-if="editingId === draft.id"
+                    class="cancel-button"
+                    icon
+                    :disabled="!canUseCrud"
+                    type="button"
+                    variant="flat"
+                    aria-label="Cancelar edición"
+                    @click="cancelEdit(draft)"
+                  >
+                    <AppIcon name="close" />
+                  </v-btn>
+                  <v-btn
+                    v-if="editingId !== draft.id"
                     class="delete-button"
                     icon
                     :disabled="!canUseCrud"
@@ -375,12 +540,21 @@ function getIconForKey(key) {
                 />
               </label>
               <label>
+                <span>Tipo de información</span>
+                <select v-model="newDraft.dataType" :disabled="!canUseCrud" aria-label="Formato del nuevo dato">
+                  <option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">
+                    {{ type.label }}
+                  </option>
+                </select>
+              </label>
+              <label>
                 <span>Valor</span>
                 <input
                   v-model="newDraft.value"
+                  :type="getDataType(newDraft.dataType).inputType"
                   :disabled="!canUseCrud"
                   :maxlength="IDENTIFICATION_MAX_LENGTH"
-                  placeholder="Escribe el valor"
+                  :placeholder="getDataType(newDraft.dataType).placeholder"
                   aria-label="Valor del nuevo dato"
                 />
               </label>
@@ -604,7 +778,9 @@ function getIconForKey(key) {
 .tag-icon svg,
 .square-icon svg,
 .row-icon svg,
+.edit-button svg,
 .save-icon-button svg,
+.cancel-button svg,
 .delete-button svg {
   display: block;
   width: 100%;
@@ -690,7 +866,8 @@ function getIconForKey(key) {
   font-weight: 750;
 }
 
-.inline-row input {
+.inline-row input,
+.inline-row select {
   width: 100%;
   min-height: 44px;
   padding: 0 12px;
@@ -704,16 +881,40 @@ function getIconForKey(key) {
   box-shadow: inset 0 1px 2px rgba(11, 56, 111, 0.04);
 }
 
+.inline-row select {
+  cursor: pointer;
+}
+
+.inline-row label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inline-row label small,
+.row-key small {
+  width: fit-content;
+  padding: 2px 6px;
+  color: #476896;
+  font-size: 0.7rem;
+  font-weight: 750;
+  background: #eaf4ff;
+  border-radius: 999px;
+}
+
 .inline-row input::placeholder {
   color: #8090bb;
 }
 
-.inline-row input:focus {
+.inline-row input:focus,
+.inline-row select:focus {
   border-color: #0b7eff;
   box-shadow: 0 0 0 4px rgba(11, 126, 255, 0.12);
 }
 
-.inline-row input:disabled {
+.inline-row input:disabled,
+.inline-row select:disabled {
   color: #67779e;
   background: #f5f8fc;
 }
@@ -768,22 +969,74 @@ function getIconForKey(key) {
 }
 
 .suggestions-panel h3 {
-  margin: 0 0 12px;
+  margin: 0;
   color: #304d89;
   font-size: 0.98rem;
   font-weight: 800;
 }
 
-.inline-row--suggestion + .inline-row--suggestion {
-  margin-top: 10px;
+.suggestions-heading {
+  margin-bottom: 12px;
+}
+
+.suggestions-heading p {
+  margin: 3px 0 0;
+  color: #687da9;
+  font-size: 0.82rem;
+}
+
+.suggestion-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggestion-option {
+  min-height: 36px;
+  padding: 7px 13px;
+  color: #0867e8;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  background: #ffffff;
+  border: 1px solid #c9def6;
+  border-radius: 999px;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.suggestion-option:hover:not(:disabled),
+.suggestion-option--selected {
+  color: #ffffff;
+  background: #0873ff;
+  border-color: #0873ff;
+}
+
+.suggestion-option:focus-visible {
+  outline: 3px solid rgba(8, 115, 255, 0.22);
+  outline-offset: 2px;
+}
+
+.suggestion-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .inline-row--suggestion {
+  margin-top: 12px;
   padding: 10px;
   border: 1px solid #d7e7f8;
   border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 5px 14px rgba(66, 126, 197, 0.06);
+}
+
+.suggestion-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .status-message {
@@ -817,6 +1070,10 @@ function getIconForKey(key) {
   border-bottom: 1px solid #e0ebf8;
 }
 
+.data-row:has(label) {
+  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto;
+}
+
 .data-row:last-child {
   border-bottom: 0;
 }
@@ -834,7 +1091,23 @@ function getIconForKey(key) {
   gap: 8px;
 }
 
+.row-key {
+  display: grid;
+  gap: 4px;
+  color: #5870ad;
+  font-size: 0.96rem;
+}
+
+.row-value {
+  overflow-wrap: anywhere;
+  color: #05083e;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.edit-button,
 .save-icon-button,
+.cancel-button,
 .delete-button {
   width: 42px;
   height: 42px;
@@ -842,10 +1115,17 @@ function getIconForKey(key) {
   border-radius: 10px;
 }
 
+.edit-button,
 .save-icon-button {
   color: #285db8;
   background: #edf6ff;
   border-color: #cfe3f8;
+}
+
+.cancel-button {
+  color: #65758c;
+  background: #f4f6f9;
+  border-color: #dce4ed;
 }
 
 .delete-button {
@@ -854,14 +1134,16 @@ function getIconForKey(key) {
   border-color: #ffdede;
 }
 
+.edit-button svg,
 .save-icon-button svg,
+.cancel-button svg,
 .delete-button svg {
   width: 22px;
   height: 22px;
 }
 
 .new-data-row {
-  grid-template-columns: 38px minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto;
   padding: 12px;
   border: 1px solid #d7e7f8;
   border-radius: 14px;
@@ -915,7 +1197,9 @@ function getIconForKey(key) {
     padding: 12px;
   }
 
+  .edit-button,
   .save-icon-button,
+  .cancel-button,
   .delete-button {
     width: 42px;
     height: 42px;
@@ -944,8 +1228,12 @@ function getIconForKey(key) {
     align-items: end;
   }
 
+  .data-row:has(label) {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
   .inline-row--suggestion {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 9px;
     padding: 11px;
   }
@@ -967,6 +1255,10 @@ function getIconForKey(key) {
     margin: 0;
   }
 
+  .inline-row--suggestion .suggestion-actions {
+    grid-column: 2;
+  }
+
   .data-row label:first-of-type,
   .new-data-row label:first-of-type {
     grid-column: 2 / -1;
@@ -977,19 +1269,40 @@ function getIconForKey(key) {
     grid-column: 2;
   }
 
+  .data-row label:nth-of-type(3),
+  .new-data-row label:nth-of-type(3) {
+    grid-column: 2;
+  }
+
   .data-row .row-icon,
   .new-data-row .row-icon {
-    grid-row: 1 / span 2;
+    grid-row: 1 / span 3;
     align-self: center;
   }
 
   .data-row .row-actions {
-    grid-row: 2;
+    grid-row: 3;
     grid-column: 3;
   }
 
-  .new-data-row .save-button {
+  .data-row .row-key {
+    grid-column: 2;
+    align-self: end;
+  }
+
+  .data-row .row-value {
     grid-row: 2;
+    grid-column: 2;
+    align-self: start;
+  }
+
+  .data-row:has(.row-key) .row-actions {
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .new-data-row .save-button {
+    grid-row: 3;
     grid-column: 3;
     min-width: 44px;
     width: 44px;

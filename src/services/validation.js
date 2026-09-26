@@ -1,3 +1,5 @@
+import { normalizeDataType } from './dataTypes'
+
 export const CATEGORY_CODE_MAX_LENGTH = 20
 export const ENTITY_TOKEN_MAX_LENGTH = 40
 export const IDENTIFICATION_MAX_LENGTH = 200
@@ -14,6 +16,7 @@ export function sanitizeText(value) {
 export function sanitizeCustomDataInput(payload) {
   const key = sanitizeText(payload?.key)
   const value = sanitizeText(payload?.value)
+  const dataType = normalizeDataType(payload?.dataType)
 
   if (!key || !value) {
     throw new Error('Dato y Valor son obligatorios.')
@@ -21,8 +24,9 @@ export function sanitizeCustomDataInput(payload) {
 
   assertMaxLength(key, CUSTOM_DATA_KEY_MAX_LENGTH, 'Dato')
   assertMaxLength(value, IDENTIFICATION_MAX_LENGTH, 'Valor')
+  validateCustomDataValue(value, dataType)
 
-  return { key, value }
+  return { key, value, dataType }
 }
 
 export function validateCategoryCode(code) {
@@ -59,4 +63,38 @@ function assertRouteValue(value, label) {
   if (!ROUTE_VALUE_PATTERN.test(value)) {
     throw new Error(`${label} solo puede contener letras, números, guion y guion bajo.`)
   }
+}
+
+function validateCustomDataValue(value, dataType) {
+  if (dataType === 'date' && !isValidIsoDate(value)) {
+    throw new Error('Selecciona una fecha válida.')
+  }
+  if (dataType === 'number' && !Number.isFinite(Number(value))) {
+    throw new Error('Escribe un número válido.')
+  }
+  if (dataType === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    throw new Error('Escribe un correo electrónico válido.')
+  }
+  if (dataType === 'tel' && !/^[0-9+() .-]{7,30}$/.test(value)) {
+    throw new Error('Escribe un número de teléfono válido.')
+  }
+  if (dataType === 'url') {
+    try {
+      const url = new URL(value)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+    } catch {
+      throw new Error('Escribe un enlace que comience por http:// o https://.')
+    }
+  }
+}
+
+function isValidIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
 }

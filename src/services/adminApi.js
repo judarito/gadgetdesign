@@ -1,4 +1,5 @@
 import { getTursoClient } from './tursoClient'
+import { normalizeDataType } from './dataTypes'
 import {
   CATEGORY_CODE_MAX_LENGTH,
   IDENTIFICATION_MAX_LENGTH,
@@ -147,7 +148,7 @@ export async function listSuggestions(
     pageSize,
   )
   const result = await db.execute({
-    sql: `SELECT id, categoriaID, name, active, sort_order
+    sql: `SELECT id, categoriaID, name, active, sort_order, data_type
           FROM CategoriaSugerencias
           WHERE categoriaID = ?
           ORDER BY sort_order, id
@@ -162,6 +163,7 @@ export async function listSuggestions(
       name: String(row.name),
       active: Boolean(row.active),
       sortOrder: Number(row.sort_order),
+      dataType: normalizeDataType(row.data_type),
     })),
     pagination,
   )
@@ -173,19 +175,20 @@ export async function saveSuggestion(suggestion) {
   const name = validateRequiredText(suggestion.name, SUGGESTION_NAME_MAX_LENGTH, 'Sugerencia')
   const active = suggestion.active ? 1 : 0
   const sortOrder = validateSortOrder(suggestion.sortOrder)
+  const dataType = normalizeDataType(suggestion.dataType)
 
   if (suggestion.id) {
     await db.execute({
       sql: `UPDATE CategoriaSugerencias
-            SET name = ?, active = ?, sort_order = ?
+            SET name = ?, active = ?, sort_order = ?, data_type = ?
             WHERE id = ? AND categoriaID = ?`,
-      args: [name, active, sortOrder, Number(suggestion.id), categoryId],
+      args: [name, active, sortOrder, dataType, Number(suggestion.id), categoryId],
     })
   } else {
     await db.execute({
-      sql: `INSERT INTO CategoriaSugerencias (categoriaID, name, active, sort_order)
-            VALUES (?, ?, ?, ?)`,
-      args: [categoryId, name, active, sortOrder],
+      sql: `INSERT INTO CategoriaSugerencias (categoriaID, name, active, sort_order, data_type)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [categoryId, name, active, sortOrder, dataType],
     })
   }
 }
