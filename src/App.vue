@@ -152,6 +152,19 @@ function closeSuggestionEditor() {
   selectedSuggestionId.value = null
 }
 
+function openDatePicker(event, dataType) {
+  if (dataType !== 'date') return
+
+  const input = event.currentTarget
+  if (typeof input?.showPicker !== 'function') return
+
+  try {
+    input.showPicker()
+  } catch {
+    // Browsers without an invokable native picker keep their default date behavior.
+  }
+}
+
 function resetSelectedSuggestion() {
   const draft = selectedSuggestion.value
   const source = suggestions.value.find((suggestion) => suggestion.id === draft?.id)
@@ -431,6 +444,7 @@ function getCategoryCopy(currentCategory) {
                     :maxlength="IDENTIFICATION_MAX_LENGTH"
                     :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
                     aria-label="Valor del dato sugerido"
+                    @click="openDatePicker($event, selectedSuggestion.dataType)"
                   />
                 </label>
                 <div class="suggestion-actions">
@@ -497,6 +511,7 @@ function getCategoryCopy(currentCategory) {
                       :maxlength="IDENTIFICATION_MAX_LENGTH"
                       :placeholder="getDataType(draft.dataType).placeholder"
                       aria-label="Valor personalizado"
+                      @click="openDatePicker($event, draft.dataType)"
                     />
                   </label>
                 </template>
@@ -601,6 +616,7 @@ function getCategoryCopy(currentCategory) {
                   :maxlength="IDENTIFICATION_MAX_LENGTH"
                   :placeholder="getDataType(newDraft.dataType).placeholder"
                   aria-label="Valor del nuevo dato"
+                  @click="openDatePicker($event, newDraft.dataType)"
                 />
               </label>
               <v-btn
@@ -646,7 +662,7 @@ function getCategoryCopy(currentCategory) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: min(100%, 980px);
+  width: min(100%, 1120px);
   min-height: 78px;
   margin: 0 auto;
   padding: 0 24px;
@@ -757,7 +773,7 @@ function getCategoryCopy(currentCategory) {
 }
 
 .content {
-  width: min(100%, 720px);
+  width: 70vw;
   margin: 0 auto;
 }
 
@@ -927,6 +943,10 @@ function getCategoryCopy(currentCategory) {
 }
 
 .inline-row select {
+  cursor: pointer;
+}
+
+.inline-row input[type='date'] {
   cursor: pointer;
 }
 
@@ -1210,6 +1230,12 @@ function getCategoryCopy(currentCategory) {
 .new-data-intro span {
   font-size: 0.86rem;
   line-height: 1.35;
+}
+
+@media (max-width: 1024px) {
+  .content {
+    width: 100%;
+  }
 }
 
 @media (max-width: 760px) {
