@@ -47,18 +47,10 @@ export async function createCustomData(categoryCode, token, payload) {
   }
 
   const customData = [...currentEntity.customData, item]
-  const shouldSetIdentification = currentEntity.customData.length === 0
 
   await db.execute({
-    sql: `UPDATE Entidades
-          SET custom_data = ?, Identificacion = CASE WHEN ? THEN ? ELSE Identificacion END
-          WHERE id = ?`,
-    args: [
-      serializeCustomData(customData),
-      shouldSetIdentification ? 1 : 0,
-      item.value,
-      currentEntity.id,
-    ],
+    sql: 'UPDATE Entidades SET custom_data = ? WHERE id = ?',
+    args: [serializeCustomData(customData), currentEntity.id],
   })
 
   return getEntityContext(safeCategoryCode, safeToken)
@@ -85,11 +77,9 @@ export async function updateCustomData(categoryCode, token, itemId, payload) {
         }
       : item,
   )
-  const nextIdentification = itemIndex === 0 ? safePayload.value : context.entity.identificacion
-
   await db.execute({
-    sql: 'UPDATE Entidades SET custom_data = ?, Identificacion = ? WHERE id = ?',
-    args: [serializeCustomData(nextData), nextIdentification, context.entity.id],
+    sql: 'UPDATE Entidades SET custom_data = ? WHERE id = ?',
+    args: [serializeCustomData(nextData), context.entity.id],
   })
 
   return getEntityContext(safeCategoryCode, safeToken)
@@ -104,11 +94,10 @@ export async function deleteCustomData(categoryCode, token, itemId) {
   if (!context.entity) throw new Error('No se encontró la entidad.')
 
   const nextData = context.entity.customData.filter((item) => item.id !== itemId)
-  const nextIdentification = nextData[0]?.value || context.entity.identificacion
 
   await db.execute({
-    sql: 'UPDATE Entidades SET custom_data = ?, Identificacion = ? WHERE id = ?',
-    args: [serializeCustomData(nextData), nextIdentification, context.entity.id],
+    sql: 'UPDATE Entidades SET custom_data = ? WHERE id = ?',
+    args: [serializeCustomData(nextData), context.entity.id],
   })
 
   return getEntityContext(safeCategoryCode, safeToken)

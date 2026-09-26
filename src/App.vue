@@ -29,9 +29,7 @@ const isAtCustomDataLimit = computed(
   () => !editingId.value && customData.value.length >= CUSTOM_DATA_LIMIT,
 )
 const canSubmit = computed(() => canUseCrud.value && !isAtCustomDataLimit.value)
-const identifierText = computed(
-  () => entity.value?.identificacion || customData.value[0]?.value || routeContext.token || 'Sin datos',
-)
+const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
 const helperText = computed(() => {
   if (isAtCustomDataLimit.value) return `Límite alcanzado: ${CUSTOM_DATA_LIMIT} datos personalizados.`
 
@@ -39,7 +37,7 @@ const helperText = computed(() => {
   const guidance =
     entity.value || customData.value.length > 0
       ? 'Ambos campos son obligatorios.'
-      : 'El primer dato guardado será la identificación principal.'
+      : 'Guarda la información adicional que necesites.'
 
   return `${guidance} ${countText}`
 })
