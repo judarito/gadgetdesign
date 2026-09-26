@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import QRCode from 'qrcode'
 import {
   Boxes,
-  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -68,7 +67,7 @@ const entitySearch = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const errorMessage = ref('')
-const successMessage = ref('')
+const toast = ref({ visible: false, message: '', color: 'success' })
 const categoryDialog = ref(false)
 const suggestionDialog = ref(false)
 const entityDialog = ref(false)
@@ -316,7 +315,7 @@ async function copyUrl(entity) {
     await navigator.clipboard.writeText(buildEntityUrl(entity))
     notifySuccess('URL copiada al portapapeles.')
   } catch {
-    errorMessage.value = 'No fue posible copiar la URL.'
+    notifyError('No fue posible copiar la URL.')
   }
 }
 
@@ -359,7 +358,7 @@ async function generateQrSvg(entity) {
 async function submitPasswordChange() {
   const form = securityForm.value
   if (form.newPassword !== form.confirmPassword) {
-    errorMessage.value = 'La confirmación de la nueva contraseña no coincide.'
+    notifyError('La confirmación de la nueva contraseña no coincide.')
     return
   }
 
@@ -376,7 +375,7 @@ async function runLoad(callback) {
   try {
     await callback()
   } catch (error) {
-    errorMessage.value = friendlyError(error)
+    notifyError(friendlyError(error))
   } finally {
     isLoading.value = false
   }
@@ -388,7 +387,7 @@ async function runAction(callback) {
   try {
     await callback()
   } catch (error) {
-    errorMessage.value = friendlyError(error)
+    notifyError(friendlyError(error))
   } finally {
     isSaving.value = false
   }
@@ -396,12 +395,20 @@ async function runAction(callback) {
 
 function notifySuccess(message) {
   errorMessage.value = ''
-  successMessage.value = message
+  showToast(message)
+}
+
+function notifyError(message) {
+  errorMessage.value = message
+  showToast(message, 'error')
+}
+
+function showToast(message, color = 'success') {
+  toast.value = { visible: true, message, color }
 }
 
 function clearMessages() {
   errorMessage.value = ''
-  successMessage.value = ''
 }
 
 function friendlyError(error) {
@@ -548,7 +555,6 @@ function emptyPagination() {
 
         <section class="admin-content">
           <p v-if="errorMessage" class="alert alert--error">{{ errorMessage }}</p>
-          <p v-if="successMessage" class="alert alert--success"><Check :size="18" /> {{ successMessage }}</p>
 
           <div v-if="activeView === 'categories'" class="view-section">
             <div class="section-toolbar">
@@ -775,6 +781,20 @@ function emptyPagination() {
         </div>
       </v-card>
     </v-dialog>
+
+    <v-snackbar
+      v-model="toast.visible"
+      :color="toast.color"
+      location="top end"
+      :timeout="3200"
+    >
+      {{ toast.message }}
+      <template #actions>
+        <v-btn icon variant="text" aria-label="Cerrar notificación" @click="toast.visible = false">
+          <X :size="20" />
+        </v-btn>
+      </template>
+    </v-snackbar>
   </v-app>
 </template>
 

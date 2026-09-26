@@ -1,5 +1,6 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
+import { CalendarDays } from '@lucide/vue'
 import {
   CUSTOM_DATA_LIMIT,
   createCustomData,
@@ -28,6 +29,7 @@ const isSaving = ref(false)
 const savingKey = ref(null)
 const editingId = ref(null)
 const errorMessage = ref('')
+const toast = ref({ visible: false, message: '', color: 'success' })
 
 const canUseCrud = computed(() => routeContext.isValid && !isLoading.value && !isSaving.value)
 const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
@@ -138,7 +140,7 @@ async function saveNewDraft(draft, requestKey) {
         suggestionId: draft.suggestionId,
       }),
     )
-  }, false, requestKey)
+  }, false, requestKey, 'Dato agregado correctamente.')
 }
 
 function selectSuggestion(draft) {
@@ -155,7 +157,16 @@ function closeSuggestionEditor() {
 function openDatePicker(event, dataType) {
   if (dataType !== 'date') return
 
-  const input = event.currentTarget
+  showNativeDatePicker(event.currentTarget)
+}
+
+function openDatePickerFromTrigger(event) {
+  const input = event.currentTarget.parentElement?.querySelector('input[type="date"]')
+  input?.focus({ preventScroll: true })
+  showNativeDatePicker(input)
+}
+
+function showNativeDatePicker(input) {
   if (typeof input?.showPicker !== 'function') return
 
   try {
@@ -183,7 +194,7 @@ async function saveExistingDraft(draft) {
         dataType: draft.dataType,
       }),
     )
-  }, false, `saved-${draft.id}`)
+  }, false, `saved-${draft.id}`, 'Dato actualizado correctamente.')
 }
 
 function startEdit(draft) {
@@ -208,7 +219,7 @@ async function removeCustomData(item) {
 
   await runRequest(async () => {
     applyContext(await deleteCustomData(routeContext.categoryCode, routeContext.token, item.id))
-  }, false, `delete-${item.id}`)
+  }, false, `delete-${item.id}`, 'Dato eliminado correctamente.')
 }
 
 function applyContext(context) {
@@ -236,7 +247,7 @@ function applyContext(context) {
   newDraft.value = { key: '', value: '', dataType: 'text' }
 }
 
-async function runRequest(callback, initialLoad = false, requestKey = null) {
+async function runRequest(callback, initialLoad = false, requestKey = null, successMessage = '') {
   errorMessage.value = ''
   isLoading.value = initialLoad
   isSaving.value = !initialLoad
@@ -244,13 +255,19 @@ async function runRequest(callback, initialLoad = false, requestKey = null) {
 
   try {
     await callback()
+    if (successMessage) showToast(successMessage)
   } catch (error) {
     errorMessage.value = error.message || 'Ocurrió un error inesperado.'
+    if (!initialLoad) showToast(errorMessage.value, 'error')
   } finally {
     isLoading.value = false
     isSaving.value = false
     savingKey.value = null
   }
+}
+
+function showToast(message, color = 'success') {
+  toast.value = { visible: true, message, color }
 }
 
 function getIconForKey(key) {
@@ -437,15 +454,26 @@ function getCategoryCopy(currentCategory) {
                 </label>
                 <label>
                   <span>Valor</span>
-                  <input
-                    v-model="selectedSuggestion.value"
-                    :type="getDataType(selectedSuggestion.dataType).inputType"
-                    :disabled="!canUseCrud"
-                    :maxlength="IDENTIFICATION_MAX_LENGTH"
-                    :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
-                    aria-label="Valor del dato sugerido"
-                    @click="openDatePicker($event, selectedSuggestion.dataType)"
-                  />
+                  <div class="value-input-shell" :class="{ 'value-input-shell--date': selectedSuggestion.dataType === 'date' }">
+                    <input
+                      v-model="selectedSuggestion.value"
+                      :type="getDataType(selectedSuggestion.dataType).inputType"
+                      :disabled="!canUseCrud"
+                      :maxlength="IDENTIFICATION_MAX_LENGTH"
+                      :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
+                      aria-label="Valor del dato sugerido"
+                      @pointerdown.capture="openDatePicker($event, selectedSuggestion.dataType)"
+                    />
+                    <button
+                      v-if="selectedSuggestion.dataType === 'date'"
+                      class="date-picker-trigger"
+                      type="button"
+                      tabindex="-1"
+                      aria-label="Abrir selector de fecha"
+                      @click="openDatePickerFromTrigger"
+                    />
+                    <CalendarDays v-if="selectedSuggestion.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
+                  </div>
                 </label>
                 <div class="suggestion-actions">
                   <v-btn
@@ -504,15 +532,26 @@ function getCategoryCopy(currentCategory) {
                   </label>
                   <label>
                     <span>Valor</span>
-                    <input
-                      v-model="draft.value"
-                      :type="getDataType(draft.dataType).inputType"
-                      :disabled="!canUseCrud"
-                      :maxlength="IDENTIFICATION_MAX_LENGTH"
-                      :placeholder="getDataType(draft.dataType).placeholder"
-                      aria-label="Valor personalizado"
-                      @click="openDatePicker($event, draft.dataType)"
-                    />
+                    <div class="value-input-shell" :class="{ 'value-input-shell--date': draft.dataType === 'date' }">
+                      <input
+                        v-model="draft.value"
+                        :type="getDataType(draft.dataType).inputType"
+                        :disabled="!canUseCrud"
+                        :maxlength="IDENTIFICATION_MAX_LENGTH"
+                        :placeholder="getDataType(draft.dataType).placeholder"
+                        aria-label="Valor personalizado"
+                        @pointerdown.capture="openDatePicker($event, draft.dataType)"
+                      />
+                      <button
+                        v-if="draft.dataType === 'date'"
+                        class="date-picker-trigger"
+                        type="button"
+                        tabindex="-1"
+                        aria-label="Abrir selector de fecha"
+                        @click="openDatePickerFromTrigger"
+                      />
+                      <CalendarDays v-if="draft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
+                    </div>
                   </label>
                 </template>
                 <template v-else>
@@ -609,15 +648,26 @@ function getCategoryCopy(currentCategory) {
               </label>
               <label>
                 <span>Valor</span>
-                <input
-                  v-model="newDraft.value"
-                  :type="getDataType(newDraft.dataType).inputType"
-                  :disabled="!canUseCrud"
-                  :maxlength="IDENTIFICATION_MAX_LENGTH"
-                  :placeholder="getDataType(newDraft.dataType).placeholder"
-                  aria-label="Valor del nuevo dato"
-                  @click="openDatePicker($event, newDraft.dataType)"
-                />
+                <div class="value-input-shell" :class="{ 'value-input-shell--date': newDraft.dataType === 'date' }">
+                  <input
+                    v-model="newDraft.value"
+                    :type="getDataType(newDraft.dataType).inputType"
+                    :disabled="!canUseCrud"
+                    :maxlength="IDENTIFICATION_MAX_LENGTH"
+                    :placeholder="getDataType(newDraft.dataType).placeholder"
+                    aria-label="Valor del nuevo dato"
+                    @pointerdown.capture="openDatePicker($event, newDraft.dataType)"
+                  />
+                  <button
+                    v-if="newDraft.dataType === 'date'"
+                    class="date-picker-trigger"
+                    type="button"
+                    tabindex="-1"
+                    aria-label="Abrir selector de fecha"
+                    @click="openDatePickerFromTrigger"
+                  />
+                  <CalendarDays v-if="newDraft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
+                </div>
               </label>
               <v-btn
                 class="save-button"
@@ -635,6 +685,20 @@ function getCategoryCopy(currentCategory) {
         </section>
       </v-main>
     </div>
+
+    <v-snackbar
+      v-model="toast.visible"
+      :color="toast.color"
+      location="top end"
+      :timeout="3200"
+    >
+      {{ toast.message }}
+      <template #actions>
+        <v-btn icon variant="text" aria-label="Cerrar notificación" @click="toast.visible = false">
+          <AppIcon name="close" />
+        </v-btn>
+      </template>
+    </v-snackbar>
   </v-app>
 </template>
 
@@ -646,6 +710,11 @@ function getCategoryCopy(currentCategory) {
     radial-gradient(circle at 94% 72%, rgba(217, 238, 255, 0.9), transparent 24%),
     linear-gradient(180deg, #ffffff 0%, #f7fbff 45%, #ffffff 100%);
   color: #05083e;
+}
+
+:deep(.v-snackbar .v-btn svg) {
+  width: 20px;
+  height: 20px;
 }
 
 .topbar {
@@ -947,7 +1016,48 @@ function getCategoryCopy(currentCategory) {
 }
 
 .inline-row input[type='date'] {
+  position: relative;
+  padding-right: 42px;
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+.value-input-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.date-picker-icon {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  z-index: 1;
+  color: #285db8;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.date-picker-trigger {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+}
+
+.inline-row input[type='date']::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
 }
 
 .inline-row label > span {
