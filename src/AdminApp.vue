@@ -846,6 +846,10 @@ function emptyPagination() {
               <strong>{{ printEntity.identification }}</strong>
             </div>
             <div>
+              <span>Impresora</span>
+              <strong>FlashForge AD5X</strong>
+            </div>
+            <div>
               <span>URL corta</span>
               <code>{{ buildEntityUrl(printEntity) }}</code>
             </div>
@@ -870,8 +874,10 @@ function emptyPagination() {
             <label class="field">
               <span>Boquilla</span>
               <select v-model.number="printSettings.nozzleMm">
-                <option :value="0.4">0.4 mm</option>
-                <option :value="0.6">0.6 mm</option>
+                <option :value="0.25">0.25 mm · opcional</option>
+                <option :value="0.4">0.4 mm · instalada de fábrica</option>
+                <option :value="0.6">0.6 mm · opcional</option>
+                <option :value="0.8">0.8 mm · opcional</option>
               </select>
             </label>
             <label class="field">
@@ -905,7 +911,8 @@ function emptyPagination() {
           </div>
 
           <p class="print-note">
-            El modelo STL incluye una base y el QR en relieve. Para dos colores, programa un cambio de filamento al comenzar el relieve.
+            Perfil preparado para FlashForge AD5X (cama de 220 × 220 mm). Importa el STL en
+            Orca-Flashforge y asigna otro color al relieve o programa el cambio de filamento al comenzar el QR.
           </p>
 
           <div class="print-actions">
@@ -1049,6 +1056,7 @@ button { letter-spacing: 0; }
 .print-content { display: grid; gap: 20px; padding: 22px; }
 .print-summary { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1fr); gap: 14px; padding: 14px; background: #f4f7fa; border: 1px solid #dce5ef; border-radius: 7px; }
 .print-summary > div { display: grid; gap: 4px; min-width: 0; }
+.print-summary > div:last-child { grid-column: 1 / -1; }
 .print-summary span { color: #68778c; font-size: .76rem; font-weight: 750; text-transform: uppercase; }
 .print-summary code { overflow: hidden; color: #174b88; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
 .print-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
@@ -1081,6 +1089,7 @@ button { letter-spacing: 0; }
   .admin-content { padding: 22px 14px 46px; }
   .print-content { padding: 16px; }
   .print-summary, .print-controls { grid-template-columns: 1fr; }
+  .print-summary > div:last-child { grid-column: auto; }
   .print-actions { display: grid; }
   .section-toolbar { flex-direction: column; align-items: stretch; gap: 14px; }
   .section-toolbar :deep(.v-btn) { width: 100%; min-width: 42px; padding: 0 12px; }
