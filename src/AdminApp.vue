@@ -46,6 +46,7 @@ import {
 } from './services/adminApi'
 import { CATEGORY_CODE_MAX_LENGTH, IDENTIFICATION_MAX_LENGTH } from './services/validation'
 import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
+import { createSlicerQrSvg } from './services/qrSvg'
 
 const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
 
@@ -338,7 +339,7 @@ async function downloadQr(entity) {
     link.click()
     link.remove()
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
-    notifySuccess('QR descargado como imagen SVG.')
+    notifySuccess('QR descargado como SVG compatible con laminadores.')
   })
 }
 
@@ -352,12 +353,7 @@ async function generateQrImage(entity) {
 }
 
 async function generateQrSvg(entity) {
-  return QRCode.toString(buildEntityUrl(entity), {
-    type: 'svg',
-    margin: 3,
-    errorCorrectionLevel: 'H',
-    color: { dark: '#071045', light: '#ffffff' },
-  })
+  return createSlicerQrSvg(buildEntityUrl(entity))
 }
 
 async function submitPasswordChange() {
@@ -683,7 +679,7 @@ function emptyPagination() {
                 </div>
                 <div class="action-cell entity-actions">
                   <button type="button" title="Ver código QR" @click="openQr(entity)"><QrCodeIcon :size="18" /></button>
-                  <button type="button" title="Descargar QR" @click="downloadQr(entity)"><Download :size="18" /></button>
+                  <button type="button" title="Descargar QR para impresión 3D" @click="downloadQr(entity)"><Download :size="18" /></button>
                   <button type="button" title="Copiar URL" @click="copyUrl(entity)"><Copy :size="18" /></button>
                   <button type="button" title="Editar" @click="openEntityDialog(entity)"><Pencil :size="18" /></button>
                   <button type="button" title="Regenerar token" @click="regenerateToken(entity)"><RefreshCw :size="18" /></button>
@@ -774,7 +770,7 @@ function emptyPagination() {
             <a :href="buildEntityUrl(qrEntity)" target="_blank">{{ buildEntityUrl(qrEntity) }}</a>
           </div>
           <v-btn color="primary" variant="flat" @click="downloadQr(qrEntity)">
-            <Download :size="18" /> Descargar SVG
+            <Download :size="18" /> Descargar SVG para impresión 3D
           </v-btn>
         </div>
       </v-card>
