@@ -114,10 +114,12 @@ async function getEntityContext(categoryCode, token) {
   }
 
   const entity = await getEntityByToken(db, category.id, safeToken)
+  const suggestions = await getSuggestionsByCategory(db, category.id)
 
   return {
     category,
     entity,
+    suggestions,
   }
 }
 
@@ -151,4 +153,20 @@ async function getEntityByToken(db, categoryId, token) {
     categoriaID: entity.categoriaID,
     customData: parseCustomData(entity.custom_data),
   }
+}
+
+async function getSuggestionsByCategory(db, categoryId) {
+  const result = await db.execute({
+    sql: `SELECT id, name
+          FROM CategoriaSugerencias
+          WHERE categoriaID = ? AND active = 1
+          ORDER BY sort_order, id
+          LIMIT ?`,
+    args: [categoryId, CUSTOM_DATA_LIMIT],
+  })
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    key: row.name,
+  }))
 }

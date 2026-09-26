@@ -17,31 +17,26 @@ const routeContext = getRouteContext()
 const category = ref(null)
 const entity = ref(null)
 const customData = ref([])
-const fieldKey = ref('')
-const fieldValue = ref('')
-const editingId = ref(null)
+const suggestions = ref([])
+const savedDrafts = ref([])
+const suggestionDrafts = ref([])
+const newDraft = ref({ key: '', value: '' })
 const isLoading = ref(false)
 const isSaving = ref(false)
+const savingKey = ref(null)
 const errorMessage = ref('')
 
 const canUseCrud = computed(() => routeContext.isValid && !isLoading.value && !isSaving.value)
-const isAtCustomDataLimit = computed(
-  () => !editingId.value && customData.value.length >= CUSTOM_DATA_LIMIT,
-)
-const canSubmit = computed(() => canUseCrud.value && !isAtCustomDataLimit.value)
+const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
 const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
 const helperText = computed(() => {
   if (isAtCustomDataLimit.value) return `Límite alcanzado: ${CUSTOM_DATA_LIMIT} datos personalizados.`
 
-  const countText = `${customData.value.length}/${CUSTOM_DATA_LIMIT} datos guardados.`
-  const guidance =
-    entity.value || customData.value.length > 0
-      ? 'Ambos campos son obligatorios.'
-      : 'Guarda la información adicional que necesites.'
-
-  return `${guidance} ${countText}`
+  return `${customData.value.length}/${CUSTOM_DATA_LIMIT} datos guardados.`
 })
-const submitLabel = computed(() => (editingId.value ? 'Guardar' : 'Agregar'))
+const showSuggestions = computed(
+  () => customData.value.length === 0 && suggestionDrafts.value.length > 0,
+)
 
 const paths = {
   user: [
@@ -69,14 +64,11 @@ const paths = {
     'M34 8C20.2 8 9 18.5 9 31.5S19.5 55 32.5 55h4.1c3.5 0 5.4-4 3.3-6.8-.9-1.2-.1-3 1.4-3H47c8.1 0 14-6.4 14-14.2C61 18.2 49 8 34 8Z',
     'M23 28a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM34 22a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM44 30a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM31 43a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
   ],
-  edit: [
-    'M14 47.5 17.5 36 43 10.5a5.7 5.7 0 0 1 8 8L25.5 44 14 47.5Z',
-    'M37 16.5 44.5 24',
-  ],
   trash: [
     'M20 22h32M27 22v30h18V22M29 22l2-8h10l2 8',
     'M32 30v14M40 30v14',
   ],
+  save: ['M16 10h29l8 8v36H11V10h5Z', 'M20 10v15h24V10M20 54V36h24v18'],
 }
 
 const AppIcon = {
@@ -122,28 +114,32 @@ async function loadEntity() {
   }, true)
 }
 
-async function submitCustomData() {
-  if (!fieldKey.value.trim() || !fieldValue.value.trim() || !canSubmit.value) return
+async function saveNewDraft(draft, requestKey) {
+  if (!draft.key.trim() || !draft.value.trim() || !canUseCrud.value || isAtCustomDataLimit.value) {
+    return
+  }
 
   await runRequest(async () => {
-    const payload = {
-      key: fieldKey.value,
-      value: fieldValue.value,
-    }
-
-    const context = editingId.value
-      ? await updateCustomData(routeContext.categoryCode, routeContext.token, editingId.value, payload)
-      : await createCustomData(routeContext.categoryCode, routeContext.token, payload)
-
-    applyContext(context)
-    resetForm()
-  })
+    applyContext(
+      await createCustomData(routeContext.categoryCode, routeContext.token, {
+        key: draft.key,
+        value: draft.value,
+      }),
+    )
+  }, false, requestKey)
 }
 
-function startEdit(item) {
-  editingId.value = item.id
-  fieldKey.value = item.key
-  fieldValue.value = item.value
+async function saveExistingDraft(draft) {
+  if (!draft.key.trim() || !draft.value.trim() || !canUseCrud.value) return
+
+  await runRequest(async () => {
+    applyContext(
+      await updateCustomData(routeContext.categoryCode, routeContext.token, draft.id, {
+        key: draft.key,
+        value: draft.value,
+      }),
+    )
+  }, false, `saved-${draft.id}`)
 }
 
 async function removeCustomData(item) {
@@ -151,26 +147,27 @@ async function removeCustomData(item) {
 
   await runRequest(async () => {
     applyContext(await deleteCustomData(routeContext.categoryCode, routeContext.token, item.id))
-    if (editingId.value === item.id) resetForm()
-  })
-}
-
-function resetForm() {
-  editingId.value = null
-  fieldKey.value = ''
-  fieldValue.value = ''
+  }, false, `delete-${item.id}`)
 }
 
 function applyContext(context) {
   category.value = context.category
   entity.value = context.entity
   customData.value = context.entity?.customData || []
+  suggestions.value = context.suggestions || []
+  savedDrafts.value = customData.value.map((item) => ({ ...item }))
+  suggestionDrafts.value =
+    customData.value.length === 0
+      ? suggestions.value.map((suggestion) => ({ ...suggestion, value: '' }))
+      : []
+  newDraft.value = { key: '', value: '' }
 }
 
-async function runRequest(callback, initialLoad = false) {
+async function runRequest(callback, initialLoad = false, requestKey = null) {
   errorMessage.value = ''
   isLoading.value = initialLoad
   isSaving.value = !initialLoad
+  savingKey.value = requestKey
 
   try {
     await callback()
@@ -179,6 +176,7 @@ async function runRequest(callback, initialLoad = false) {
   } finally {
     isLoading.value = false
     isSaving.value = false
+    savingKey.value = null
   }
 }
 
@@ -256,74 +254,148 @@ function getIconForKey(key) {
 
             <div v-if="isLoading" class="status-message">Cargando información...</div>
 
-            <form v-else class="input-panel" @submit.prevent="submitCustomData">
-              <label>
-                <span>Dato <b>*</b></span>
-                <input
-                  v-model="fieldKey"
-                  :disabled="!canSubmit"
-                  :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
-                  placeholder="Ej. Raza"
-                />
-              </label>
-              <label>
-                <span>Valor <b>*</b></span>
-                <input
-                  v-model="fieldValue"
-                  :disabled="!canSubmit"
-                  :maxlength="IDENTIFICATION_MAX_LENGTH"
-                  placeholder="Ej. Labrador"
-                />
-              </label>
-              <v-btn
-                class="add-button"
-                color="primary"
-                :disabled="!canSubmit"
-                :loading="isSaving"
-                size="large"
-                type="submit"
-                variant="flat"
-              >
-                <span class="plus-icon" aria-hidden="true" />
-                {{ submitLabel }}
-              </v-btn>
-              <p>{{ helperText }}</p>
-            </form>
+            <div v-if="!isLoading" class="inline-header">
+              <span>{{ helperText }}</span>
+              <span>Dato y Valor son obligatorios.</span>
+            </div>
 
-            <div class="data-list" aria-label="Datos personalizados guardados">
-              <div v-if="!customData.length && !isLoading" class="empty-row">
-                Aún no hay datos personalizados.
-              </div>
-              <div v-for="item in customData" :key="item.id" class="data-row">
+            <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
+              <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
+              <form
+                v-for="draft in suggestionDrafts"
+                :key="draft.id"
+                class="inline-row inline-row--suggestion"
+                @submit.prevent="saveNewDraft(draft, `suggestion-${draft.id}`)"
+              >
+                <label>
+                  <span>Dato</span>
+                  <input
+                    v-model="draft.key"
+                    :disabled="!canUseCrud"
+                    :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
+                    aria-label="Dato sugerido"
+                  />
+                </label>
+                <label>
+                  <span>Valor</span>
+                  <input
+                    v-model="draft.value"
+                    :disabled="!canUseCrud"
+                    :maxlength="IDENTIFICATION_MAX_LENGTH"
+                    placeholder="Escribe el valor"
+                    aria-label="Valor del dato sugerido"
+                  />
+                </label>
+                <v-btn
+                  class="save-button"
+                  color="primary"
+                  :disabled="!canUseCrud || !draft.key.trim() || !draft.value.trim()"
+                  :loading="savingKey === `suggestion-${draft.id}`"
+                  type="submit"
+                  variant="flat"
+                >
+                  <AppIcon name="save" />
+                  Guardar
+                </v-btn>
+              </form>
+            </section>
+
+            <div v-if="savedDrafts.length" class="data-list" aria-label="Datos personalizados guardados">
+              <form
+                v-for="draft in savedDrafts"
+                :key="draft.id"
+                class="inline-row data-row"
+                @submit.prevent="saveExistingDraft(draft)"
+              >
                 <span class="row-icon" aria-hidden="true">
-                  <AppIcon :name="getIconForKey(item.key)" />
+                  <AppIcon :name="getIconForKey(draft.key)" />
                 </span>
-                <span class="row-key">{{ item.key }}</span>
-                <strong class="row-value">{{ item.value }}</strong>
+                <label>
+                  <span>Dato</span>
+                  <input
+                    v-model="draft.key"
+                    :disabled="!canUseCrud"
+                    :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
+                    aria-label="Dato personalizado"
+                  />
+                </label>
+                <label>
+                  <span>Valor</span>
+                  <input
+                    v-model="draft.value"
+                    :disabled="!canUseCrud"
+                    :maxlength="IDENTIFICATION_MAX_LENGTH"
+                    aria-label="Valor personalizado"
+                  />
+                </label>
                 <div class="row-actions">
                   <v-btn
-                    class="edit-button"
+                    class="save-icon-button"
                     icon
-                    :disabled="!canUseCrud"
+                    :disabled="!canUseCrud || !draft.key.trim() || !draft.value.trim()"
+                    :loading="savingKey === `saved-${draft.id}`"
+                    type="submit"
                     variant="flat"
-                    aria-label="Editar"
-                    @click="startEdit(item)"
+                    aria-label="Guardar cambios"
                   >
-                    <AppIcon name="edit" />
+                    <AppIcon name="save" />
                   </v-btn>
                   <v-btn
                     class="delete-button"
                     icon
                     :disabled="!canUseCrud"
+                    :loading="savingKey === `delete-${draft.id}`"
+                    type="button"
                     variant="flat"
                     aria-label="Eliminar"
-                    @click="removeCustomData(item)"
+                    @click="removeCustomData(draft)"
                   >
                     <AppIcon name="trash" />
                   </v-btn>
                 </div>
-              </div>
+              </form>
             </div>
+
+            <form
+              v-if="!isLoading && !isAtCustomDataLimit"
+              class="inline-row new-data-row"
+              @submit.prevent="saveNewDraft(newDraft, 'new')"
+            >
+              <span class="row-icon" aria-hidden="true">
+                <AppIcon name="file" />
+              </span>
+              <label>
+                <span>Nuevo dato</span>
+                <input
+                  v-model="newDraft.key"
+                  :disabled="!canUseCrud"
+                  :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
+                  placeholder="Ej. Raza"
+                  aria-label="Nuevo dato personalizado"
+                />
+              </label>
+              <label>
+                <span>Valor</span>
+                <input
+                  v-model="newDraft.value"
+                  :disabled="!canUseCrud"
+                  :maxlength="IDENTIFICATION_MAX_LENGTH"
+                  placeholder="Escribe el valor"
+                  aria-label="Valor del nuevo dato"
+                />
+              </label>
+              <v-btn
+                class="save-button"
+                color="primary"
+                :disabled="!canUseCrud || !newDraft.key.trim() || !newDraft.value.trim()"
+                :loading="savingKey === 'new'"
+                type="submit"
+                variant="flat"
+              >
+                <span class="plus-icon" aria-hidden="true" />
+                Agregar
+              </v-btn>
+            </form>
           </v-sheet>
         </section>
       </v-main>
@@ -532,7 +604,7 @@ function getIconForKey(key) {
 .tag-icon svg,
 .square-icon svg,
 .row-icon svg,
-.edit-button svg,
+.save-icon-button svg,
 .delete-button svg {
   display: block;
   width: 100%;
@@ -593,33 +665,35 @@ function getIconForKey(key) {
   height: 34px;
 }
 
-.input-panel {
+.inline-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 2px 12px;
+  color: #5570ad;
+  font-size: 0.88rem;
+}
+
+.inline-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 10px 10px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: end;
-  margin: 0 -4px 14px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(235, 247, 255, 0.98), rgba(244, 250, 255, 0.94));
 }
 
-.input-panel label {
+.inline-row label {
   display: grid;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
   color: #304d89;
-  font-size: 0.98rem;
-  font-weight: 700;
+  font-size: 0.82rem;
+  font-weight: 750;
 }
 
-.input-panel b {
-  color: #ff171e;
-}
-
-.input-panel input {
+.inline-row input {
   width: 100%;
-  min-height: 48px;
-  padding: 0 14px;
+  min-height: 44px;
+  padding: 0 12px;
   color: #071045;
   font: inherit;
   font-weight: 500;
@@ -630,24 +704,35 @@ function getIconForKey(key) {
   box-shadow: inset 0 1px 2px rgba(11, 56, 111, 0.04);
 }
 
-.input-panel input::placeholder {
+.inline-row input::placeholder {
   color: #8090bb;
 }
 
-.input-panel input:focus {
+.inline-row input:focus {
   border-color: #0b7eff;
   box-shadow: 0 0 0 4px rgba(11, 126, 255, 0.12);
 }
 
-.add-button {
-  min-width: 128px;
-  min-height: 48px;
+.inline-row input:disabled {
+  color: #67779e;
+  background: #f5f8fc;
+}
+
+.save-button {
+  min-width: 118px;
+  min-height: 44px;
   padding: 0 16px;
   border-radius: 10px;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
   text-transform: none;
   box-shadow: 0 10px 22px rgba(2, 101, 243, 0.24);
+}
+
+.save-button svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 7px;
 }
 
 .plus-icon {
@@ -674,12 +759,31 @@ function getIconForKey(key) {
   transform: translate(-50%, -50%) rotate(90deg);
 }
 
-.input-panel > p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: #5570ad;
-  font-size: 0.9rem;
-  line-height: 1.2;
+.suggestions-panel {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px dashed #bed8f4;
+  border-radius: 14px;
+  background: rgba(244, 250, 255, 0.82);
+}
+
+.suggestions-panel h3 {
+  margin: 0 0 12px;
+  color: #304d89;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.inline-row--suggestion + .inline-row--suggestion {
+  margin-top: 10px;
+}
+
+.inline-row--suggestion {
+  padding: 10px;
+  border: 1px solid #d7e7f8;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 5px 14px rgba(66, 126, 197, 0.06);
 }
 
 .status-message {
@@ -700,25 +804,16 @@ function getIconForKey(key) {
 
 .data-list {
   overflow: hidden;
+  margin-bottom: 14px;
   border: 1px solid #e0ebf8;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
 }
 
-.empty-row {
-  padding: 18px;
-  color: #5870ad;
-  font-weight: 600;
-  text-align: center;
-}
-
 .data-row {
-  display: grid;
-  grid-template-columns: 50px minmax(92px, 0.7fr) minmax(112px, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  min-height: 52px;
-  padding: 7px 12px;
+  grid-template-columns: 38px minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  min-height: 72px;
+  padding: 9px 12px;
   border-bottom: 1px solid #e0ebf8;
 }
 
@@ -734,34 +829,23 @@ function getIconForKey(key) {
   color: #285db8;
 }
 
-.row-key {
-  color: #5870ad;
-  font-size: 1rem;
-}
-
-.row-value {
-  color: #05083e;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
 .row-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
-.edit-button,
+.save-icon-button,
 .delete-button {
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   border: 1px solid;
   border-radius: 10px;
 }
 
-.edit-button {
+.save-icon-button {
   color: #285db8;
-  background: #ffffff;
-  border-color: #d7e6f8;
+  background: #edf6ff;
+  border-color: #cfe3f8;
 }
 
 .delete-button {
@@ -770,10 +854,18 @@ function getIconForKey(key) {
   border-color: #ffdede;
 }
 
-.edit-button svg,
+.save-icon-button svg,
 .delete-button svg {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
+}
+
+.new-data-row {
+  grid-template-columns: 38px minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  padding: 12px;
+  border: 1px solid #d7e7f8;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(235, 247, 255, 0.98), rgba(244, 250, 255, 0.94));
 }
 
 @media (max-width: 760px) {
@@ -811,33 +903,26 @@ function getIconForKey(key) {
     padding: 10px 22px;
   }
 
-  .input-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-    margin-right: -8px;
-    margin-left: -8px;
-    gap: 8px;
-    padding: 12px;
-  }
-
   .data-row {
-    grid-template-columns: 42px minmax(84px, 0.8fr) minmax(110px, 1fr) auto;
-    gap: 10px;
-    min-height: 66px;
+    grid-template-columns: 34px minmax(0, 0.9fr) minmax(0, 1fr) auto;
+    min-height: 72px;
     padding: 8px 10px;
   }
 
-  .row-actions {
-    gap: 8px;
+  .suggestions-panel {
+    margin-right: -4px;
+    margin-left: -4px;
+    padding: 12px;
   }
 
-  .edit-button,
+  .save-icon-button,
   .delete-button {
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
   }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 560px) {
   .brand-word {
     font-size: 1.22rem;
   }
@@ -847,25 +932,77 @@ function getIconForKey(key) {
     height: 40px;
   }
 
-  .input-panel {
-    grid-template-columns: 1fr;
+  .inline-header {
+    display: grid;
+    gap: 3px;
   }
 
-  .add-button {
-    width: 100%;
+  .inline-row,
+  .data-row,
+  .new-data-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: end;
   }
 
-  .data-row {
-    grid-template-columns: 34px 1fr auto;
+  .inline-row--suggestion {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 9px;
+    padding: 11px;
   }
 
-  .row-value {
-    grid-column: 2 / 3;
+  .inline-row--suggestion label:first-child {
+    grid-column: 1 / -1;
   }
 
-  .row-actions {
+  .inline-row--suggestion .save-button {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .inline-row--suggestion .save-button svg {
+    width: 21px;
+    height: 21px;
+    margin: 0;
+  }
+
+  .data-row label:first-of-type,
+  .new-data-row label:first-of-type {
+    grid-column: 2 / -1;
+  }
+
+  .data-row label:nth-of-type(2),
+  .new-data-row label:nth-of-type(2) {
+    grid-column: 2;
+  }
+
+  .data-row .row-icon,
+  .new-data-row .row-icon {
     grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .data-row .row-actions {
+    grid-row: 2;
     grid-column: 3;
+  }
+
+  .new-data-row .save-button {
+    grid-row: 2;
+    grid-column: 3;
+    min-width: 44px;
+    width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .new-data-row .plus-icon {
+    margin: 0;
+  }
+
+  .save-button {
+    width: 100%;
   }
 }
 </style>
