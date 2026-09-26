@@ -60,23 +60,62 @@ if (!hasShortCode) {
   await db.execute('ALTER TABLE Entidades ADD COLUMN short_code TEXT')
 }
 
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityAliases (
+  id INTEGER PRIMARY KEY,
+  entity_id INTEGER NOT NULL,
+  code TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT constraint_EntityAliases_Entity
+    FOREIGN KEY (entity_id) REFERENCES Entidades (id) ON DELETE CASCADE
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity ON EntityAliases (entity_id)',
+)
+
+async function generateUniqueShortCode() {
+  let shortCode
+  let exists = true
+
+  while (exists) {
+    shortCode = randomBytes(6).toString('base64url')
+    const duplicate = await db.execute({
+      sql: `SELECT 1 FROM Entidades WHERE short_code = ?
+            UNION ALL
+            SELECT 1 FROM EntityAliases WHERE code = ?
+            LIMIT 1`,
+      args: [shortCode, shortCode],
+    })
+    exists = duplicate.rows.length > 0
+  }
+
+  return shortCode
+}
+
 const entitiesWithoutShortCode = await db.execute(
   "SELECT id FROM Entidades WHERE short_code IS NULL OR TRIM(short_code) = ''",
 )
 
 for (const entity of entitiesWithoutShortCode.rows) {
-  let shortCode
-  let exists = true
+  const shortCode = await generateUniqueShortCode()
 
-  while (exists) {
-    shortCode = randomBytes(9).toString('base64url')
-    const duplicate = await db.execute({
-      sql: 'SELECT 1 FROM Entidades WHERE short_code = ? LIMIT 1',
-      args: [shortCode],
-    })
-    exists = duplicate.rows.length > 0
-  }
+  await db.execute({
+    sql: 'UPDATE Entidades SET short_code = ? WHERE id = ?',
+    args: [shortCode, entity.id],
+  })
+}
 
+const entitiesWithLongCode = await db.execute(
+  'SELECT id, short_code FROM Entidades WHERE LENGTH(short_code) > 8',
+)
+
+for (const entity of entitiesWithLongCode.rows) {
+  await db.execute({
+    sql: 'INSERT OR IGNORE INTO EntityAliases (entity_id, code) VALUES (?, ?)',
+    args: [entity.id, entity.short_code],
+  })
+
+  const shortCode = await generateUniqueShortCode()
   await db.execute({
     sql: 'UPDATE Entidades SET short_code = ? WHERE id = ?',
     args: [shortCode, entity.id],

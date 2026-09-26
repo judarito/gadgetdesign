@@ -1,6 +1,6 @@
 import { getTursoClient } from './tursoClient'
 import { normalizeDataType } from './dataTypes'
-import { generateShortCode } from './shortCode'
+import { generateUniqueShortCode } from './shortCode'
 import {
   CATEGORY_CODE_MAX_LENGTH,
   IDENTIFICATION_MAX_LENGTH,
@@ -256,7 +256,7 @@ export async function createEntity(payload) {
   )
   const categoryId = validateId(payload.categoryId, 'categoría')
   const token = crypto.randomUUID()
-  const shortCode = generateShortCode()
+  const shortCode = await generateUniqueShortCode(db)
 
   await db.execute({
     sql: `INSERT INTO Entidades (Identificacion, token, short_code, categoriaID, custom_data)
@@ -287,18 +287,24 @@ export async function regenerateEntityToken(entityId) {
   const db = getTursoClient()
   const id = validateId(entityId, 'entidad')
   const token = crypto.randomUUID()
-  const shortCode = generateShortCode()
-  await db.execute({
-    sql: 'UPDATE Entidades SET token = ?, short_code = ? WHERE id = ?',
-    args: [token, shortCode, id],
-  })
+  const shortCode = await generateUniqueShortCode(db)
+  await db.batch([
+    { sql: 'DELETE FROM EntityAliases WHERE entity_id = ?', args: [id] },
+    {
+      sql: 'UPDATE Entidades SET token = ?, short_code = ? WHERE id = ?',
+      args: [token, shortCode, id],
+    },
+  ], 'write')
   return { token, shortCode }
 }
 
 export async function deleteEntity(entityId) {
   const db = getTursoClient()
   const id = validateId(entityId, 'entidad')
-  await db.execute({ sql: 'DELETE FROM Entidades WHERE id = ?', args: [id] })
+  await db.batch([
+    { sql: 'DELETE FROM EntityAliases WHERE entity_id = ?', args: [id] },
+    { sql: 'DELETE FROM Entidades WHERE id = ?', args: [id] },
+  ], 'write')
 }
 
 async function getAdminCredential() {

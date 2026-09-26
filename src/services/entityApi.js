@@ -1,6 +1,6 @@
 import { createCustomDataItem, parseCustomData, serializeCustomData } from './customData'
 import { getTursoClient } from './tursoClient'
-import { generateShortCode, isUuid } from './shortCode'
+import { generateUniqueShortCode, isUuid } from './shortCode'
 import {
   sanitizeCustomDataInput,
   validateCategoryCode,
@@ -55,7 +55,9 @@ export async function createCustomData(categoryCode, token, payload) {
     if (!safeCategoryCode) throw new Error('No se encontró la entidad.')
 
     const internalToken = isUuid(safeToken) ? safeToken : crypto.randomUUID()
-    const shortCode = isUuid(safeToken) ? generateShortCode() : safeToken
+    const shortCode = isUuid(safeToken)
+      ? await generateUniqueShortCode(db)
+      : safeToken
     await db.execute({
       sql: `INSERT INTO Entidades (Identificacion, token, short_code, categoriaID, custom_data)
             VALUES (?, ?, ?, ?, ?)`,
@@ -187,11 +189,13 @@ async function getCategoryById(db, categoryId) {
 async function getEntityByToken(db, categoryId, token) {
   const safeToken = validateEntityToken(token)
   const result = await db.execute({
-    sql: `SELECT id, Identificacion AS identificacion, token, short_code, categoriaID, custom_data
-          FROM Entidades
-          WHERE categoriaID = ? AND (short_code = ? OR token = ?)
+    sql: `SELECT DISTINCT e.id, e.Identificacion AS identificacion, e.token,
+                 e.short_code, e.categoriaID, e.custom_data
+          FROM Entidades e
+          LEFT JOIN EntityAliases a ON a.entity_id = e.id
+          WHERE e.categoriaID = ? AND (e.short_code = ? OR e.token = ? OR a.code = ?)
           LIMIT 1`,
-    args: [categoryId, safeToken, safeToken],
+    args: [categoryId, safeToken, safeToken, safeToken],
   })
 
   return mapEntity(result.rows[0])
@@ -200,11 +204,13 @@ async function getEntityByToken(db, categoryId, token) {
 async function getEntityByShortCode(db, shortCode) {
   const safeShortCode = validateEntityToken(shortCode)
   const result = await db.execute({
-    sql: `SELECT id, Identificacion AS identificacion, token, short_code, categoriaID, custom_data
-          FROM Entidades
-          WHERE short_code = ?
+    sql: `SELECT DISTINCT e.id, e.Identificacion AS identificacion, e.token,
+                 e.short_code, e.categoriaID, e.custom_data
+          FROM Entidades e
+          LEFT JOIN EntityAliases a ON a.entity_id = e.id
+          WHERE e.short_code = ? OR a.code = ?
           LIMIT 1`,
-    args: [safeShortCode],
+    args: [safeShortCode, safeShortCode],
   })
 
   return mapEntity(result.rows[0])
