@@ -51,7 +51,7 @@ const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
 const authenticated = ref(hasAdminSession())
 const password = ref('')
 const showPassword = ref(false)
-const activeView = ref('categories')
+const activeView = ref('entities')
 const sidebarOpen = ref(false)
 const categories = ref([])
 const categoryRows = ref([])
@@ -93,9 +93,9 @@ const pageTitle = computed(
 )
 
 const navigation = [
+  { id: 'entities', label: 'Entidades', icon: Users },
   { id: 'categories', label: 'Categorías', icon: Tag },
   { id: 'suggestions', label: 'Sugerencias', icon: Lightbulb },
-  { id: 'entities', label: 'Entidades', icon: Users },
   { id: 'security', label: 'Seguridad', icon: ShieldCheck },
 ]
 
@@ -130,6 +130,7 @@ async function loadInitialData() {
     const firstCategory = categories.value[0]
     selectedCategoryId.value ??= firstCategory?.id ?? null
     entityCategoryId.value ??= null
+    await loadEntities()
   })
 }
 
