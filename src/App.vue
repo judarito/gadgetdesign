@@ -514,26 +514,6 @@ function getCategoryCopy(currentCategory) {
               <span>Dato y Valor son obligatorios.</span>
             </div>
 
-            <div v-if="entity && !isLoading && !auth.authorized" class="crud-lock-notice">
-              <LockKeyhole :size="20" aria-hidden="true" />
-              <div>
-                <strong>Acciones bloqueadas</strong>
-                <span v-if="auth.canRequestCode">Obtén un código para agregar, editar o eliminar datos. Los controles con candado iniciarán la verificación.</span>
-                <span v-else>Esta ficha es de solo lectura porque aún no tiene un correo de acceso configurado.</span>
-              </div>
-              <v-btn
-                v-if="auth.canRequestCode"
-                class="crud-unlock-button"
-                color="primary"
-                :loading="savingKey === 'request-access'"
-                type="button"
-                variant="flat"
-                @click="requestProtectedAccess"
-              >
-                <Mail :size="17" /> Obtener código
-              </v-btn>
-            </div>
-
             <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
               <div class="suggestions-heading">
                 <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
@@ -703,9 +683,7 @@ function getCategoryCopy(currentCategory) {
                     @click="runProtectedAction(() => startEdit(draft))"
                   >
                     <AppIcon name="edit" />
-                    <span v-if="!auth.authorized" class="action-lock-badge" aria-hidden="true">
-                      <LockKeyhole :size="11" />
-                    </span>
+                    <LockKeyhole v-if="!auth.authorized" class="action-lock-icon" :size="16" aria-hidden="true" />
                   </v-btn>
                   <v-btn
                     v-if="editingId === draft.id"
@@ -745,9 +723,7 @@ function getCategoryCopy(currentCategory) {
                     @click="runProtectedAction(() => removeCustomData(draft))"
                   >
                     <AppIcon name="trash" />
-                    <span v-if="!auth.authorized" class="action-lock-badge" aria-hidden="true">
-                      <LockKeyhole :size="11" />
-                    </span>
+                    <LockKeyhole v-if="!auth.authorized" class="action-lock-icon" :size="16" aria-hidden="true" />
                   </v-btn>
                 </div>
               </form>
@@ -1446,43 +1422,6 @@ function getCategoryCopy(currentCategory) {
   background: #fff3f4;
 }
 
-.crud-lock-notice {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 11px;
-  align-items: center;
-  margin: 0 0 14px;
-  padding: 12px 14px;
-  color: #274f82;
-  background: #eef6ff;
-  border: 1px solid #cfe2f6;
-  border-radius: 12px;
-}
-
-.crud-lock-notice > svg {
-  color: #1764bd;
-}
-
-.crud-lock-notice > div {
-  display: grid;
-  gap: 2px;
-}
-
-.crud-lock-notice strong {
-  color: #123d73;
-  font-size: 0.9rem;
-}
-
-.crud-lock-notice span {
-  font-size: 0.82rem;
-  line-height: 1.35;
-}
-
-.crud-unlock-button {
-  min-height: 40px;
-  text-transform: none;
-}
-
 .data-list {
   overflow: hidden;
   margin-bottom: 14px;
@@ -1584,24 +1523,21 @@ function getCategoryCopy(currentCategory) {
 
 .edit-button.locked-action-button,
 .delete-button.locked-action-button {
+  width: 54px;
   color: #315f98;
   background: #eef5fc;
   border-color: #c8dcef;
 }
 
-.action-lock-badge {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  display: grid;
-  width: 19px;
-  height: 19px;
-  place-items: center;
-  color: #ffffff;
-  background: #175cae;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 2px 5px rgba(23, 74, 139, 0.24);
+.locked-action-button :deep(.v-btn__content) {
+  gap: 3px;
+}
+
+.locked-action-button .action-lock-icon {
+  width: 16px;
+  height: 16px;
+  color: #174a8b;
+  stroke-width: 2.5;
 }
 
 .edit-button svg,
@@ -1724,15 +1660,6 @@ function getCategoryCopy(currentCategory) {
 
   .access-panel { grid-template-columns: auto minmax(0, 1fr); }
   .access-panel .access-button { grid-column: 1 / -1; width: 100%; }
-
-  .crud-lock-notice {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .crud-unlock-button {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
 
   .inline-row,
   .data-row,
