@@ -153,9 +153,33 @@ async function saveNewDraft(draft, requestKey) {
 }
 
 function selectSuggestion(draft) {
+  if (!auth.value.authorized) {
+    requestProtectedAccess()
+    return
+  }
   if (!canUseCrud.value) return
   if (selectedSuggestionId.value !== draft.id) resetSelectedSuggestion()
   selectedSuggestionId.value = draft.id
+}
+
+function requestProtectedAccess() {
+  if (auth.value.authorized) return
+
+  if (!auth.value.canRequestCode) {
+    showToast('Esta ficha está en modo solo lectura porque no tiene un correo configurado.', 'error')
+    return
+  }
+
+  requestAccess()
+}
+
+function runProtectedAction(action) {
+  if (!auth.value.authorized) {
+    requestProtectedAccess()
+    return
+  }
+
+  action()
 }
 
 function closeSuggestionEditor() {
@@ -490,6 +514,26 @@ function getCategoryCopy(currentCategory) {
               <span>Dato y Valor son obligatorios.</span>
             </div>
 
+            <div v-if="entity && !isLoading && !auth.authorized" class="crud-lock-notice">
+              <LockKeyhole :size="20" aria-hidden="true" />
+              <div>
+                <strong>Acciones bloqueadas</strong>
+                <span v-if="auth.canRequestCode">Obtén un código para agregar, editar o eliminar datos. Los controles con candado iniciarán la verificación.</span>
+                <span v-else>Esta ficha es de solo lectura porque aún no tiene un correo de acceso configurado.</span>
+              </div>
+              <v-btn
+                v-if="auth.canRequestCode"
+                class="crud-unlock-button"
+                color="primary"
+                :loading="savingKey === 'request-access'"
+                type="button"
+                variant="flat"
+                @click="requestProtectedAccess"
+              >
+                <Mail :size="17" /> Obtener código
+              </v-btn>
+            </div>
+
             <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
               <div class="suggestions-heading">
                 <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
@@ -500,11 +544,15 @@ function getCategoryCopy(currentCategory) {
                   v-for="draft in suggestionDrafts"
                   :key="draft.id"
                   class="suggestion-option"
-                  :class="{ 'suggestion-option--selected': selectedSuggestionId === draft.id }"
-                  :disabled="!canUseCrud"
+                  :class="{
+                    'suggestion-option--selected': selectedSuggestionId === draft.id,
+                    'suggestion-option--locked': !auth.authorized,
+                  }"
+                  :disabled="isLoading || isSaving || (!auth.authorized && !auth.canRequestCode)"
                   type="button"
                   @click="selectSuggestion(draft)"
                 >
+                  <LockKeyhole v-if="!auth.authorized" :size="14" aria-hidden="true" />
                   {{ draft.key }}
                 </button>
               </div>
@@ -645,14 +693,19 @@ function getCategoryCopy(currentCategory) {
                   <v-btn
                     v-if="editingId !== draft.id"
                     class="edit-button"
+                    :class="{ 'locked-action-button': !auth.authorized }"
                     icon
-                    :disabled="!canUseCrud"
+                    :disabled="isLoading || isSaving || (!auth.authorized && !auth.canRequestCode)"
                     type="button"
                     variant="flat"
-                    aria-label="Editar"
-                    @click="startEdit(draft)"
+                    :aria-label="auth.authorized ? 'Editar' : 'Obtener código para editar'"
+                    :title="auth.authorized ? 'Editar' : 'Obtén un código para editar'"
+                    @click="runProtectedAction(() => startEdit(draft))"
                   >
                     <AppIcon name="edit" />
+                    <span v-if="!auth.authorized" class="action-lock-badge" aria-hidden="true">
+                      <LockKeyhole :size="11" />
+                    </span>
                   </v-btn>
                   <v-btn
                     v-if="editingId === draft.id"
@@ -681,15 +734,20 @@ function getCategoryCopy(currentCategory) {
                   <v-btn
                     v-if="editingId !== draft.id"
                     class="delete-button"
+                    :class="{ 'locked-action-button': !auth.authorized }"
                     icon
-                    :disabled="!canUseCrud"
+                    :disabled="isLoading || isSaving || (!auth.authorized && !auth.canRequestCode)"
                     :loading="savingKey === `delete-${draft.id}`"
                     type="button"
                     variant="flat"
-                    aria-label="Eliminar"
-                    @click="removeCustomData(draft)"
+                    :aria-label="auth.authorized ? 'Eliminar' : 'Obtener código para eliminar'"
+                    :title="auth.authorized ? 'Eliminar' : 'Obtén un código para eliminar'"
+                    @click="runProtectedAction(() => removeCustomData(draft))"
                   >
                     <AppIcon name="trash" />
+                    <span v-if="!auth.authorized" class="action-lock-badge" aria-hidden="true">
+                      <LockKeyhole :size="11" />
+                    </span>
                   </v-btn>
                 </div>
               </form>
@@ -755,14 +813,24 @@ function getCategoryCopy(currentCategory) {
               </label>
               <v-btn
                 class="save-button"
+                :class="{ 'save-button--locked': !auth.authorized }"
                 color="primary"
-                :disabled="!canUseCrud || !newDraft.key.trim() || !newDraft.value.trim()"
+                :disabled="auth.authorized
+                  ? !canUseCrud || !newDraft.key.trim() || !newDraft.value.trim()
+                  : isLoading || isSaving || !auth.canRequestCode"
                 :loading="savingKey === 'new'"
-                type="submit"
+                :type="auth.authorized ? 'submit' : 'button'"
                 variant="flat"
+                @click="!auth.authorized && requestProtectedAccess()"
               >
-                <span class="plus-icon" aria-hidden="true" />
-                Agregar
+                <template v-if="auth.authorized">
+                  <span class="plus-icon" aria-hidden="true" />
+                  Agregar
+                </template>
+                <template v-else>
+                  <LockKeyhole :size="19" />
+                  Obtener código
+                </template>
               </v-btn>
             </form>
           </v-sheet>
@@ -1299,6 +1367,9 @@ function getCategoryCopy(currentCategory) {
 }
 
 .suggestion-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 36px;
   padding: 7px 13px;
   color: #0867e8;
@@ -1331,6 +1402,18 @@ function getCategoryCopy(currentCategory) {
   opacity: 0.55;
 }
 
+.suggestion-option--locked:not(:disabled) {
+  color: #345f98;
+  background: #f4f8fc;
+  border-color: #cbdced;
+}
+
+.suggestion-option--locked:hover:not(:disabled) {
+  color: #174a8b;
+  background: #e8f2fc;
+  border-color: #a9c9e9;
+}
+
 .inline-row--suggestion {
   grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) auto auto;
   margin-top: 12px;
@@ -1361,6 +1444,43 @@ function getCategoryCopy(currentCategory) {
   color: #9d171e;
   border-color: #ffd8dc;
   background: #fff3f4;
+}
+
+.crud-lock-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  color: #274f82;
+  background: #eef6ff;
+  border: 1px solid #cfe2f6;
+  border-radius: 12px;
+}
+
+.crud-lock-notice > svg {
+  color: #1764bd;
+}
+
+.crud-lock-notice > div {
+  display: grid;
+  gap: 2px;
+}
+
+.crud-lock-notice strong {
+  color: #123d73;
+  font-size: 0.9rem;
+}
+
+.crud-lock-notice span {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.crud-unlock-button {
+  min-height: 40px;
+  text-transform: none;
 }
 
 .data-list {
@@ -1436,6 +1556,7 @@ function getCategoryCopy(currentCategory) {
 .save-icon-button,
 .cancel-button,
 .delete-button {
+  position: relative;
   width: 42px;
   height: 42px;
   border: 1px solid;
@@ -1459,6 +1580,28 @@ function getCategoryCopy(currentCategory) {
   color: #ff1018;
   background: #fff0f0;
   border-color: #ffdede;
+}
+
+.edit-button.locked-action-button,
+.delete-button.locked-action-button {
+  color: #315f98;
+  background: #eef5fc;
+  border-color: #c8dcef;
+}
+
+.action-lock-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  color: #ffffff;
+  background: #175cae;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(23, 74, 139, 0.24);
 }
 
 .edit-button svg,
@@ -1582,6 +1725,15 @@ function getCategoryCopy(currentCategory) {
   .access-panel { grid-template-columns: auto minmax(0, 1fr); }
   .access-panel .access-button { grid-column: 1 / -1; width: 100%; }
 
+  .crud-lock-notice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .crud-unlock-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
   .inline-row,
   .data-row,
   .new-data-row {
@@ -1670,12 +1822,13 @@ function getCategoryCopy(currentCategory) {
   }
 
   .new-data-row .save-button {
-    grid-row: 4;
-    grid-column: 3;
-    min-width: 44px;
-    width: 44px;
-    padding: 0;
-    font-size: 0;
+    grid-row: 5;
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+
+  .new-data-row .save-button--locked {
+    gap: 7px;
   }
 
   .new-data-row .plus-icon {
