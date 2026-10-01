@@ -20,6 +20,17 @@ await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`)
 
+await db.execute(`CREATE TABLE IF NOT EXISTS AdminLoginAttempts (
+  id INTEGER PRIMARY KEY,
+  request_ip TEXT NOT NULL,
+  succeeded NUMERIC NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_admin_login_attempts_ip_time ON AdminLoginAttempts (request_ip, created_at)',
+)
+
 await db.execute(`CREATE TABLE IF NOT EXISTS CategoriaSugerencias (
   id INTEGER PRIMARY KEY,
   categoriaID INTEGER NOT NULL,
@@ -52,6 +63,9 @@ if (!hasDataType) {
 await db.execute(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_categoria_token ON Entidades (categoriaID, token)',
 )
+await db.execute(
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_token ON Entidades (token)',
+)
 
 const entityColumns = await db.execute('PRAGMA table_info(Entidades)')
 const hasShortCode = entityColumns.rows.some((column) => column.name === 'short_code')
@@ -59,6 +73,36 @@ const hasShortCode = entityColumns.rows.some((column) => column.name === 'short_
 if (!hasShortCode) {
   await db.execute('ALTER TABLE Entidades ADD COLUMN short_code TEXT')
 }
+
+const entitySecurityColumns = [
+  ['owner_name', 'TEXT'],
+  ['owner_email', 'TEXT'],
+  ['owner_phone', 'TEXT'],
+  ['auth_version', 'INTEGER NOT NULL DEFAULT 1'],
+]
+
+for (const [name, definition] of entitySecurityColumns) {
+  if (!entityColumns.rows.some((column) => column.name === name)) {
+    await db.execute(`ALTER TABLE Entidades ADD COLUMN ${name} ${definition}`)
+  }
+}
+
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityAccessCodes (
+  id INTEGER PRIMARY KEY,
+  entity_id INTEGER NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  consumed NUMERIC NOT NULL DEFAULT 0,
+  request_ip TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  CONSTRAINT constraint_EntityAccessCodes_Entity
+    FOREIGN KEY (entity_id) REFERENCES Entidades (id) ON DELETE CASCADE
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_lookup ON EntityAccessCodes (entity_id, created_at)',
+)
 
 await db.execute(`CREATE TABLE IF NOT EXISTS EntityAliases (
   id INTEGER PRIMARY KEY,

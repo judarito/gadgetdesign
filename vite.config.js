@@ -1,18 +1,9 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 
-export default defineConfig(({ mode }) => {
-  const env = {
-    ...process.env,
-    ...loadEnv(mode, process.cwd(), ''),
-  }
-
+export default defineConfig(() => {
   return {
-    define: {
-      __TURSO_URL__: JSON.stringify(env.TURSO_URL || env.VITE_TURSO_URL || ''),
-      __TURSO_TOKEN__: JSON.stringify(env.TURSO_TOKEN || env.VITE_TURSO_TOKEN || ''),
-    },
     plugins: [
       vue({
         template: { transformAssetUrls },
@@ -21,5 +12,13 @@ export default defineConfig(({ mode }) => {
         autoImport: true,
       }),
     ],
+    server: {
+      proxy: {
+        '/.netlify/functions': {
+          target: 'http://127.0.0.1:9999',
+          changeOrigin: true,
+        },
+      },
+    },
   }
 })

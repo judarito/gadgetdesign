@@ -1,13 +1,16 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
-import { CalendarDays } from '@lucide/vue'
+import { CalendarDays, LockKeyhole, LogOut, Mail, ShieldCheck } from '@lucide/vue'
 import {
   CUSTOM_DATA_LIMIT,
   createCustomData,
   deleteCustomData,
   fetchEntity,
   getRouteContext,
+  logoutEntityAccess,
+  requestEntityAccessCode,
   updateCustomData,
+  verifyEntityAccessCode,
 } from './services/entityApi'
 import {
   CUSTOM_DATA_KEY_MAX_LENGTH,
@@ -23,7 +26,10 @@ const suggestions = ref([])
 const savedDrafts = ref([])
 const suggestionDrafts = ref([])
 const selectedSuggestionId = ref(null)
-const newDraft = ref({ key: '', value: '', dataType: 'text' })
+const newDraft = ref({ key: '', value: '', dataType: 'text', protected: false })
+const auth = ref({ authorized: false, canRequestCode: false, emailHint: '' })
+const accessDialog = ref(false)
+const accessCode = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const savingKey = ref(null)
@@ -31,7 +37,9 @@ const editingId = ref(null)
 const errorMessage = ref('')
 const toast = ref({ visible: false, message: '', color: 'success' })
 
-const canUseCrud = computed(() => routeContext.isValid && !isLoading.value && !isSaving.value)
+const canUseCrud = computed(() =>
+  routeContext.isValid && auth.value.authorized && !isLoading.value && !isSaving.value,
+)
 const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
 const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
 const categoryCopy = computed(() => getCategoryCopy(category.value))
@@ -138,6 +146,7 @@ async function saveNewDraft(draft, requestKey) {
         value: draft.value,
         dataType: draft.dataType,
         suggestionId: draft.suggestionId,
+        protected: draft.protected,
       }),
     )
   }, false, requestKey, 'Dato agregado correctamente.')
@@ -180,7 +189,7 @@ function resetSelectedSuggestion() {
   const draft = selectedSuggestion.value
   const source = suggestions.value.find((suggestion) => suggestion.id === draft?.id)
   if (!draft || !source) return
-  Object.assign(draft, source, { suggestionId: Number(source.id), value: '' })
+  Object.assign(draft, source, { suggestionId: Number(source.id), value: '', protected: false })
 }
 
 async function saveExistingDraft(draft) {
@@ -192,6 +201,7 @@ async function saveExistingDraft(draft) {
         key: draft.key,
         value: draft.value,
         dataType: draft.dataType,
+        protected: draft.protected,
       }),
     )
   }, false, `saved-${draft.id}`, 'Dato actualizado correctamente.')
@@ -227,6 +237,7 @@ function applyContext(context) {
   entity.value = context.entity
   customData.value = context.entity?.customData || []
   suggestions.value = context.suggestions || []
+  auth.value = context.auth || { authorized: false, canRequestCode: false, emailHint: '' }
   savedDrafts.value = customData.value.map((item) => ({ ...item }))
   editingId.value = null
   const usedSuggestionIds = new Set(
@@ -242,9 +253,40 @@ function applyContext(context) {
       ...suggestion,
       suggestionId: Number(suggestion.id),
       value: '',
+      protected: false,
     }))
   selectedSuggestionId.value = null
-  newDraft.value = { key: '', value: '', dataType: 'text' }
+  newDraft.value = { key: '', value: '', dataType: 'text', protected: false }
+}
+
+async function requestAccess() {
+  await runRequest(async () => {
+    const result = await requestEntityAccessCode(routeContext.categoryCode, routeContext.token)
+    auth.value.emailHint = result.emailHint
+    accessCode.value = ''
+    accessDialog.value = true
+  }, false, 'request-access', `Enviamos un código a ${auth.value.emailHint}.`)
+}
+
+async function verifyAccess() {
+  if (!/^\d{6}$/.test(accessCode.value)) return
+  await runRequest(async () => {
+    applyContext(
+      await verifyEntityAccessCode(
+        routeContext.categoryCode,
+        routeContext.token,
+        accessCode.value,
+      ),
+    )
+    accessDialog.value = false
+  }, false, 'verify-access', 'Acceso verificado correctamente.')
+}
+
+async function closeAccess() {
+  await logoutEntityAccess().catch(() => {})
+  accessDialog.value = false
+  await loadEntity()
+  showToast('Sesión cerrada.')
 }
 
 async function runRequest(callback, initialLoad = false, requestKey = null, successMessage = '') {
@@ -409,6 +451,34 @@ function getCategoryCopy(currentCategory) {
               </div>
             </div>
 
+            <div v-if="entity && !isLoading" class="access-panel" :class="{ 'access-panel--verified': auth.authorized }">
+              <component :is="auth.authorized ? ShieldCheck : LockKeyhole" :size="22" />
+              <div>
+                <strong>{{ auth.authorized ? 'Acceso verificado' : 'Información protegida' }}</strong>
+                <span v-if="auth.authorized">Puedes ver datos protegidos y administrar esta ficha durante 8 horas.</span>
+                <span v-else-if="auth.canRequestCode">Valida el código enviado a {{ auth.emailHint }} para ver datos protegidos o realizar cambios.</span>
+                <span v-else>Esta ficha está en modo solo lectura hasta que el administrador configure un correo.</span>
+              </div>
+              <v-btn
+                v-if="auth.authorized"
+                class="access-button"
+                variant="tonal"
+                @click="closeAccess"
+              >
+                <LogOut :size="17" /> Salir
+              </v-btn>
+              <v-btn
+                v-else-if="auth.canRequestCode"
+                class="access-button"
+                color="primary"
+                :loading="savingKey === 'request-access'"
+                variant="flat"
+                @click="requestAccess"
+              >
+                <Mail :size="17" /> Enviar código
+              </v-btn>
+            </div>
+
             <div v-if="errorMessage" class="status-message status-message--error">
               {{ errorMessage }}
             </div>
@@ -474,6 +544,10 @@ function getCategoryCopy(currentCategory) {
                     />
                     <CalendarDays v-if="selectedSuggestion.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
                   </div>
+                </label>
+                <label class="protection-toggle">
+                  <input v-model="selectedSuggestion.protected" type="checkbox" />
+                  <span><LockKeyhole :size="16" /> Proteger valor</span>
                 </label>
                 <div class="suggestion-actions">
                   <v-btn
@@ -553,13 +627,19 @@ function getCategoryCopy(currentCategory) {
                       <CalendarDays v-if="draft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
                     </div>
                   </label>
+                  <label class="protection-toggle">
+                    <input v-model="draft.protected" type="checkbox" />
+                    <span><LockKeyhole :size="16" /> Proteger valor</span>
+                  </label>
                 </template>
                 <template v-else>
                   <span class="row-key">
                     <span>{{ draft.key }}</span>
-                    <small>{{ getDataType(draft.dataType).label }}</small>
+                    <small>{{ getDataType(draft.dataType).label }}<template v-if="draft.protected"> · Protegido</template></small>
                   </span>
-                  <strong class="row-value">{{ formatCustomDataValue(draft.value, draft.dataType) }}</strong>
+                  <strong class="row-value" :class="{ 'row-value--masked': draft.masked }">
+                    {{ draft.masked ? '••••••••' : formatCustomDataValue(draft.value, draft.dataType) }}
+                  </strong>
                 </template>
                 <div class="row-actions">
                   <v-btn
@@ -669,6 +749,10 @@ function getCategoryCopy(currentCategory) {
                   <CalendarDays v-if="newDraft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
                 </div>
               </label>
+              <label class="protection-toggle">
+                <input v-model="newDraft.protected" type="checkbox" />
+                <span><LockKeyhole :size="16" /> Proteger valor</span>
+              </label>
               <v-btn
                 class="save-button"
                 color="primary"
@@ -685,6 +769,30 @@ function getCategoryCopy(currentCategory) {
         </section>
       </v-main>
     </div>
+
+    <v-dialog v-model="accessDialog" max-width="430" persistent>
+      <v-card class="access-dialog">
+        <div class="access-dialog__icon"><Mail :size="26" /></div>
+        <h2>Escribe el código</h2>
+        <p>Enviamos un código de seis dígitos a <strong>{{ auth.emailHint }}</strong>. Vence en 10 minutos.</p>
+        <form @submit.prevent="verifyAccess">
+          <input
+            v-model="accessCode"
+            inputmode="numeric"
+            maxlength="6"
+            pattern="[0-9]{6}"
+            autocomplete="one-time-code"
+            aria-label="Código de acceso"
+            placeholder="000000"
+            @input="accessCode = accessCode.replace(/\D/g, '').slice(0, 6)"
+          />
+          <div>
+            <v-btn variant="text" type="button" @click="accessDialog = false">Cancelar</v-btn>
+            <v-btn color="primary" type="submit" variant="flat" :disabled="accessCode.length !== 6" :loading="savingKey === 'verify-access'">Verificar</v-btn>
+          </div>
+        </form>
+      </v-card>
+    </v-dialog>
 
     <v-snackbar
       v-model="toast.visible"
@@ -954,6 +1062,30 @@ function getCategoryCopy(currentCategory) {
   line-height: 1.25;
 }
 
+.access-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 13px 14px;
+  color: #74520d;
+  background: #fff9e9;
+  border: 1px solid #f1d999;
+  border-radius: 10px;
+}
+
+.access-panel--verified {
+  color: #126047;
+  background: #eaf8f2;
+  border-color: #bfe5d5;
+}
+
+.access-panel > div { display: grid; gap: 2px; }
+.access-panel span { font-size: .84rem; line-height: 1.35; }
+.access-button { text-transform: none; letter-spacing: 0; }
+.access-button :deep(.v-btn__content) { gap: 7px; }
+
 .square-icon {
   display: grid;
   width: 54px;
@@ -1200,6 +1332,7 @@ function getCategoryCopy(currentCategory) {
 }
 
 .inline-row--suggestion {
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) auto auto;
   margin-top: 12px;
   padding: 10px;
   border: 1px solid #d7e7f8;
@@ -1246,7 +1379,7 @@ function getCategoryCopy(currentCategory) {
 }
 
 .data-row:has(label) {
-  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto auto;
 }
 
 .data-row:last-child {
@@ -1279,6 +1412,25 @@ function getCategoryCopy(currentCategory) {
   font-size: 1rem;
   font-weight: 650;
 }
+
+.row-value--masked { letter-spacing: 3px; color: #526684; }
+
+.protection-toggle {
+  display: flex !important;
+  align-items: center;
+  align-self: center;
+  gap: 7px !important;
+  min-height: 44px;
+  padding: 0 10px;
+  color: #28558f !important;
+  background: #eef6ff;
+  border: 1px solid #d0e3f8;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+
+.protection-toggle input { width: 17px; min-height: 17px; padding: 0; box-shadow: none; }
+.protection-toggle span { display: inline-flex; align-items: center; gap: 5px; }
 
 .edit-button,
 .save-icon-button,
@@ -1318,12 +1470,20 @@ function getCategoryCopy(currentCategory) {
 }
 
 .new-data-row {
-  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto auto;
   padding: 12px;
   border: 1px solid #d7e7f8;
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(235, 247, 255, 0.98), rgba(244, 250, 255, 0.94));
 }
+
+.access-dialog { padding: 24px; text-align: center; }
+.access-dialog__icon { display: grid; width: 54px; height: 54px; margin: 0 auto 12px; place-items: center; color: #0873ff; background: #eaf4ff; border-radius: 50%; }
+.access-dialog h2 { margin: 0; color: #071045; font-size: 1.35rem; }
+.access-dialog p { margin: 8px 0 18px; color: #607194; line-height: 1.45; }
+.access-dialog form { display: grid; gap: 18px; }
+.access-dialog form > input { width: 100%; min-height: 54px; color: #071045; font-size: 1.5rem; font-weight: 800; letter-spacing: 8px; text-align: center; border: 1px solid #bfd7f2; border-radius: 9px; outline: none; }
+.access-dialog form > div { display: flex; justify-content: flex-end; gap: 8px; }
 
 .new-data-intro {
   display: grid;
@@ -1419,6 +1579,9 @@ function getCategoryCopy(currentCategory) {
     gap: 3px;
   }
 
+  .access-panel { grid-template-columns: auto minmax(0, 1fr); }
+  .access-panel .access-button { grid-column: 1 / -1; width: 100%; }
+
   .inline-row,
   .data-row,
   .new-data-row {
@@ -1435,6 +1598,8 @@ function getCategoryCopy(currentCategory) {
     gap: 9px;
     padding: 11px;
   }
+
+  .inline-row--suggestion .protection-toggle { grid-column: 1 / -1; }
 
   .inline-row--suggestion label:first-child {
     grid-column: 1 / -1;
@@ -1472,14 +1637,19 @@ function getCategoryCopy(currentCategory) {
     grid-column: 2;
   }
 
+  .data-row .protection-toggle,
+  .new-data-row .protection-toggle {
+    grid-column: 2;
+  }
+
   .data-row .row-icon,
   .new-data-row .row-icon {
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 4;
     align-self: center;
   }
 
   .data-row .row-actions {
-    grid-row: 3;
+    grid-row: 4;
     grid-column: 3;
   }
 
@@ -1500,7 +1670,7 @@ function getCategoryCopy(currentCategory) {
   }
 
   .new-data-row .save-button {
-    grid-row: 3;
+    grid-row: 4;
     grid-column: 3;
     min-width: 44px;
     width: 44px;

@@ -51,7 +51,7 @@ import { getQrPrintMetrics } from './services/qrPrintMetrics'
 
 const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
 
-const authenticated = ref(hasAdminSession())
+const authenticated = ref(false)
 const password = ref('')
 const showPassword = ref(false)
 const activeView = ref('entities')
@@ -110,7 +110,12 @@ const navigation = [
 ]
 
 onMounted(async () => {
-  if (authenticated.value) await loadInitialData()
+  try {
+    authenticated.value = await hasAdminSession()
+    if (authenticated.value) await loadInitialData()
+  } catch {
+    authenticated.value = false
+  }
 })
 
 async function login() {
@@ -125,8 +130,8 @@ async function login() {
   })
 }
 
-function logout() {
-  clearAdminSession()
+async function logout() {
+  await clearAdminSession().catch(() => {})
   authenticated.value = false
   categories.value = []
   suggestions.value = []
@@ -500,7 +505,16 @@ function emptySuggestion(categoryId = null, sortOrder = 10) {
 }
 
 function emptyEntity(categoryId = null) {
-  return { id: null, identification: '', categoryId, token: '', shortCode: '' }
+  return {
+    id: null,
+    identification: '',
+    categoryId,
+    token: '',
+    shortCode: '',
+    ownerName: '',
+    ownerEmail: '',
+    ownerPhone: '',
+  }
 }
 
 function defaultPrintSettings() {
@@ -739,7 +753,11 @@ function emptyPagination() {
               <article v-for="entity in entities" :key="entity.id" class="entity-row">
                 <div class="entity-identity">
                   <span class="cell-icon"><Users :size="18" /></span>
-                  <div><strong>{{ entity.identification }}</strong><span>{{ entity.categoryName }} · {{ entity.categoryCode }}</span></div>
+                  <div>
+                    <strong>{{ entity.identification }}</strong>
+                    <span>{{ entity.categoryName }} · {{ entity.categoryCode }}</span>
+                    <span>{{ entity.ownerEmail || 'Sin correo de acceso' }}</span>
+                  </div>
                 </div>
                 <div class="entity-url">
                   <span>URL pública</span>
@@ -818,6 +836,10 @@ function emptyPagination() {
         <form @submit.prevent="submitEntity">
           <label class="field"><span>Identificación</span><input v-model="entityDraft.identification" :maxlength="IDENTIFICATION_MAX_LENGTH" placeholder="Ej. ABC-123" /></label>
           <label class="field"><span>Categoría</span><select v-model="entityDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
+          <label class="field"><span>Nombre del propietario <small>Opcional</small></span><input v-model="entityDraft.ownerName" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
+          <label class="field"><span>Correo de acceso <small>Opcional</small></span><input v-model="entityDraft.ownerEmail" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
+          <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="entityDraft.ownerPhone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
+          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso a modificaciones</strong><span>{{ entityDraft.ownerEmail ? 'El correo recibirá el código para ver datos protegidos y realizar cambios.' : 'Sin correo, la ficha pública permanecerá en modo solo lectura.' }}</span></p></div>
           <div v-if="!entityDraft.id" class="guid-preview"><KeyRound :size="19" /><p><strong>Acceso seguro automático</strong><span>Se generará un GUID interno y un código corto para la URL.</span></p></div>
           <div v-else class="url-preview"><span>URL actual</span><code>{{ buildUrl(categories.find((item) => item.id === Number(entityDraft.categoryId))?.code, entityDraft.shortCode || entityDraft.token, Boolean(entityDraft.shortCode)) }}</code></div>
           <div class="dialog-actions"><v-btn variant="text" @click="entityDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>

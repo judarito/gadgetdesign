@@ -49,19 +49,28 @@ export function createCustomDataItem({ key, value, dataType, suggestionId }) {
 
 function normalizeItem(item, index = 0) {
   const fallbackKey = `Dato ${index + 1}`
+  const isProtected = Boolean(item.protected)
   const sanitized = sanitizeCustomDataInput({
     key: item.key || item.label || fallbackKey,
-    value: item.value,
+    value: item.value || (isProtected && item.encryptedValue ? 'protected' : ''),
     dataType: item.dataType,
   })
 
-  return {
+  const normalized = {
     id: sanitizeText(item.id || crypto.randomUUID()),
     key: sanitized.key,
-    value: sanitized.value,
     dataType: sanitized.dataType,
     suggestionId: normalizeSuggestionId(item.suggestionId),
+    protected: isProtected,
   }
+
+  if (isProtected && item.encryptedValue) {
+    normalized.encryptedValue = sanitizeText(item.encryptedValue)
+  } else {
+    normalized.value = sanitized.value
+  }
+
+  return normalized
 }
 
 function normalizeSuggestionId(value) {

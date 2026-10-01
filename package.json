@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/devLocal.mjs",
+    "dev:vite": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "setup:local": "node scripts/setupLocal.mjs",
+    "test:functions": "node scripts/testFunctions.mjs",
     "setup:admin": "node scripts/setupAdmin.mjs"
   },
   "dependencies": {
