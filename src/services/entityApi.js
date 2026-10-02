@@ -54,3 +54,9 @@ export function deleteCustomData(categoryCode, token, itemId) {
     action: 'delete-data', method: 'DELETE', body: { categoryCode, token, itemId },
   })
 }
+
+export function deleteEntityProfile(categoryCode, token, confirmation) {
+  return apiRequest('entity', {
+    action: 'delete-entity', method: 'DELETE', body: { categoryCode, token, confirmation },
+  })
+}

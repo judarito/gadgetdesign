@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
+import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const server = spawn('npm', ['run', 'dev'], {
@@ -25,12 +26,22 @@ try {
   await waitForServer()
   const route = { token: 'Local001' }
 
-  const publicContext = await request('entity', 'context', { query: route })
+  const publicResult = await request('entity', 'context', { query: route, includeResponse: true })
+  const publicContext = publicResult.data
   assert(publicContext.entity.identificacion === 'LOCAL-001', 'Debe cargar la entidad local.')
   const protectedItem = publicContext.entity.customData.find((item) => item.id === 'local-protected')
   assert(protectedItem.masked && protectedItem.value === '', 'El dato protegido debe llegar enmascarado.')
   assert(!('encryptedValue' in protectedItem), 'La API pública no debe exponer el texto cifrado.')
   assert(!publicContext.auth.authorized, 'La sesión pública no debe estar autorizada.')
+  assert(publicResult.response.headers.get('cache-control') === 'no-store',
+    'El navegador no debe almacenar la lectura pública.')
+  const publicCdnCache = publicResult.response.headers.get('netlify-cdn-cache-control') || ''
+  assert(publicCdnCache.includes('public') && publicCdnCache.includes('durable') && publicCdnCache.includes('s-maxage=60'),
+    'La lectura pública debe usar caché durable de 60 segundos.')
+  assert(!publicCdnCache.includes('stale-while-revalidate'),
+    'La lectura pública no debe servir contenido vencido mientras revalida.')
+  assert(publicResult.response.headers.get('netlify-cache-tag') === 'entity-1,category-1',
+    'La lectura pública debe etiquetarse por entidad y categoría.')
 
   await expectStatus(() => request('entity', 'create-data', {
     method: 'POST', body: { ...route, data: { key: 'Sin permiso', value: 'No', dataType: 'text' } },
@@ -50,6 +61,14 @@ try {
   assert(verification.data.auth.authorized, 'La respuesta debe quedar autorizada.')
   const revealed = verification.data.entity.customData.find((item) => item.id === 'local-protected')
   assert(revealed.value === 'POL-123456', 'El dato protegido debe revelarse después del OTP.')
+  const authorizedContext = await request('entity', 'context', {
+    query: route, cookie: entityCookie, includeResponse: true,
+  })
+  assert(authorizedContext.data.auth.authorized, 'La consulta con cookie debe conservar la autorización.')
+  assert(authorizedContext.response.headers.get('netlify-cdn-cache-control') === 'no-store',
+    'Una lectura autorizada nunca debe almacenarse en el CDN.')
+  assert(!authorizedContext.response.headers.get('netlify-cache-tag'),
+    'Una lectura autorizada no debe registrar etiquetas de caché.')
 
   const created = await request('entity', 'create-data', {
     method: 'POST', cookie: entityCookie,
@@ -62,6 +81,48 @@ try {
   const stored = await db.execute("SELECT custom_data FROM Entidades WHERE short_code = 'Local001'")
   assert(!String(stored.rows[0].custom_data).includes('VALOR-SENSIBLE'), 'El valor protegido no debe guardarse en texto plano.')
 
+  await db.execute('DROP TRIGGER validate_categories_update')
+  await db.execute({ sql: 'UPDATE Categorias SET name = ? WHERE id = 1', args: ['Vehículos\t'] })
+  await applyDataIntegrityConstraints(db)
+  const normalizedCategory = await db.execute('SELECT name, code FROM Categorias WHERE id = 1')
+  assert(normalizedCategory.rows[0].name === 'Vehículos' && normalizedCategory.rows[0].code === 'VEH',
+    'La migración debe conservar categorías normalizadas.')
+  await expectDbFailure(() => db.execute({
+    sql: `INSERT INTO Entidades
+          (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version)
+          VALUES (99, ?, ?, 1, '[]', ?, 1)`,
+    args: ['local-001', '22222222-2222-4222-8222-222222222222', 'Unique99'],
+  }), 'La base debe impedir identificaciones duplicadas sin distinguir mayúsculas.')
+  await expectDbFailure(() => db.execute({
+    sql: 'UPDATE Categorias SET name = ? WHERE id = 1',
+    args: ['Vehículos\t'],
+  }), 'La base debe rechazar espacios invisibles en categorías.')
+  await expectDbFailure(() => db.execute({
+    sql: `INSERT INTO CategoriaSugerencias
+          (categoriaID, name, active, sort_order, data_type) VALUES (1, ?, 1, 99, 'text')`,
+    args: ['Dato\u200Binvisible'],
+  }), 'La base debe rechazar caracteres invisibles en sugerencias.')
+  await expectDbFailure(() => db.execute({
+    sql: 'UPDATE Entidades SET owner_email = ? WHERE id = 1',
+    args: ['Cliente@Example.com'],
+  }), 'La base debe exigir correos normalizados.')
+  await expectDbFailure(() => db.execute({
+    sql: 'UPDATE Entidades SET Identificacion = ? WHERE id = 1',
+    args: ['X'.repeat(201)],
+  }), 'La base debe verificar las longitudes aunque se omita la Function.')
+  await expectDbFailure(() => db.execute({
+    sql: `INSERT INTO Entidades
+          (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version)
+          VALUES (100, 'OTRA-ENTIDAD', ?, 1, '[]', 'Unique10', 1)`,
+    args: ['11111111-1111-4111-8111-111111111111'],
+  }), 'La base debe impedir tokens duplicados.')
+  await expectDbFailure(() => db.execute({
+    sql: `INSERT INTO Entidades
+          (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version)
+          VALUES (101, 'RUTA-CRUZADA', 'Local001', 1, '[]', 'Unique11', 1)`,
+    args: [],
+  }), 'La base debe impedir que un token coincida con otro código corto.')
+
   await request('entity', 'update-data', {
     method: 'PATCH', cookie: entityCookie,
     body: { ...route, itemId: createdItem.id, data: { key: 'Dato secreto de prueba', value: 'VALOR-NUEVO', dataType: 'text', protected: true } },
@@ -70,6 +131,9 @@ try {
     method: 'DELETE', cookie: entityCookie, body: { ...route, itemId: createdItem.id },
   })
   assert(!afterDelete.entity.customData.some((item) => item.id === createdItem.id), 'El dato de prueba debe eliminarse.')
+  await expectStatus(() => request('entity', 'delete-data', {
+    method: 'DELETE', cookie: entityCookie, body: { ...route, itemId: createdItem.id },
+  }), 404, 'Eliminar un dato inexistente debe informar el conflicto.')
   db.close()
 
   const adminSession = await request('admin', 'session')
@@ -91,11 +155,28 @@ try {
     body: { identification: 'local-001', categoryId: 1, ownerName: '', ownerEmail: '', ownerPhone: '' },
   }), 409, 'No debe permitir identificaciones duplicadas.')
 
+  await expectStatus(() => request('entity', 'delete-entity', {
+    method: 'DELETE', cookie: entityCookie,
+    body: { ...route, confirmation: 'IDENTIFICADOR INCORRECTO' },
+  }), 400, 'La eliminación completa debe exigir el identificador exacto.')
+  const deletedEntity = await request('entity', 'delete-entity', {
+    method: 'DELETE', cookie: entityCookie,
+    body: { ...route, confirmation: 'LOCAL-001' }, includeResponse: true,
+  })
+  assert(deletedEntity.data.ok, 'La eliminación completa debe confirmar el resultado.')
+  assert(deletedEntity.response.headers.get('set-cookie')?.includes('Max-Age=0'),
+    'La eliminación completa debe cerrar la sesión de la entidad.')
+  const missingEntity = await request('entity', 'context', { query: route })
+  assert(!missingEntity.entity, 'La entidad eliminada no debe volver a consultarse.')
+
   console.log('✓ Lectura pública enmascarada')
+  console.log('✓ Caché público durable y sesiones con no-store')
   console.log('✓ OTP local y cookie HttpOnly')
   console.log('✓ Revelado autorizado')
   console.log('✓ Cifrado AES-GCM en almacenamiento')
   console.log('✓ CRUD protegido')
+  console.log('✓ Restricciones de integridad aplicadas directamente en la base')
+  console.log('✓ Confirmaciones y eliminación completa transaccional')
   console.log('✓ Sesión administrativa serverless')
 } finally {
   try {
@@ -160,6 +241,15 @@ async function expectStatus(callback, status, message) {
   } catch (error) {
     if (String(error.message).includes(`: ${status} `)) return
     throw error
+  }
+  throw new Error(message)
+}
+
+async function expectDbFailure(callback, message) {
+  try {
+    await callback()
+  } catch {
+    return
   }
   throw new Error(message)
 }

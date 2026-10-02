@@ -9,7 +9,12 @@ function stop(exitCode = 0) {
   if (stopping) return
   stopping = true
   for (const child of children) {
-    if (!child.killed) child.kill('SIGTERM')
+    if (child.killed) continue
+    try {
+      process.kill(-child.pid, 'SIGTERM')
+    } catch {
+      child.kill('SIGTERM')
+    }
   }
   setTimeout(() => process.exit(exitCode), 250)
 }
@@ -32,6 +37,7 @@ const functions = spawn('netlify', ['functions:serve', '--offline', '--port', '9
   cwd: process.cwd(),
   env: { ...process.env, XDG_CONFIG_HOME: '/tmp/netlify-config' },
   stdio: 'inherit',
+  detached: true,
 })
 watch(functions)
 
@@ -41,6 +47,7 @@ try {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'inherit',
+    detached: true,
   }))
 } catch (error) {
   console.error(error.message)

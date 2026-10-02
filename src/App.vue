@@ -1,10 +1,21 @@
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
-import { CalendarDays, LockKeyhole, LogOut, Mail, ShieldCheck } from '@lucide/vue'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  AlertTriangle,
+  CalendarDays,
+  LockKeyhole,
+  LogOut,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  WifiOff,
+} from '@lucide/vue'
 import {
   CUSTOM_DATA_LIMIT,
   createCustomData,
   deleteCustomData,
+  deleteEntityProfile,
   fetchEntity,
   getRouteContext,
   logoutEntityAccess,
@@ -29,6 +40,13 @@ const selectedSuggestionId = ref(null)
 const newDraft = ref({ key: '', value: '', dataType: 'text', protected: false })
 const auth = ref({ authorized: false, canRequestCode: false, emailHint: '' })
 const accessDialog = ref(false)
+const deleteDataDialog = ref(false)
+const privacyDialog = ref(false)
+const deleteEntityDialog = ref(false)
+const pendingDeleteItem = ref(null)
+const deleteEntityConfirmation = ref('')
+const entityDeleted = ref(false)
+const isOffline = ref(!navigator.onLine)
 const accessCode = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
@@ -121,7 +139,25 @@ const AppIcon = {
   },
 }
 
-onMounted(loadEntity)
+onMounted(() => {
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+  loadEntity()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
+})
+
+function handleOnline() {
+  isOffline.value = false
+  if (!entity.value && !entityDeleted.value) loadEntity()
+}
+
+function handleOffline() {
+  isOffline.value = true
+}
 
 async function loadEntity() {
   if (!routeContext.isValid) {
@@ -249,14 +285,64 @@ function restoreDraft(itemId) {
 }
 
 async function removeCustomData(item) {
-  if (!canUseCrud.value) return
+  if (!canUseCrud.value) return false
 
-  await runRequest(async () => {
+  return runRequest(async () => {
     applyContext(await deleteCustomData(routeContext.categoryCode, routeContext.token, item.id))
   }, false, `delete-${item.id}`, 'Dato eliminado correctamente.')
 }
 
+function requestDeleteCustomData(item) {
+  runProtectedAction(() => {
+    pendingDeleteItem.value = item
+    deleteDataDialog.value = true
+  })
+}
+
+async function confirmDeleteCustomData() {
+  if (!pendingDeleteItem.value) return
+  const deleted = await removeCustomData(pendingDeleteItem.value)
+  if (!deleted) return
+
+  deleteDataDialog.value = false
+  pendingDeleteItem.value = null
+}
+
+function openEntityDeletion() {
+  privacyDialog.value = false
+  if (!auth.value.authorized) {
+    requestProtectedAccess()
+    return
+  }
+
+  deleteEntityConfirmation.value = ''
+  deleteEntityDialog.value = true
+}
+
+async function confirmDeleteEntity() {
+  if (deleteEntityConfirmation.value.trim() !== identifierText.value.trim()) return
+
+  const deleted = await runRequest(async () => {
+    await deleteEntityProfile(
+      routeContext.categoryCode,
+      routeContext.token,
+      deleteEntityConfirmation.value,
+    )
+    entityDeleted.value = true
+    entity.value = null
+    customData.value = []
+    savedDrafts.value = []
+    suggestionDrafts.value = []
+    auth.value = { authorized: false, canRequestCode: false, emailHint: '' }
+  }, false, 'delete-entity', 'La ficha y sus datos fueron eliminados.')
+
+  if (!deleted) return
+  deleteEntityDialog.value = false
+  deleteEntityConfirmation.value = ''
+}
+
 function applyContext(context) {
+  entityDeleted.value = false
   category.value = context.category
   entity.value = context.entity
   customData.value = context.entity?.customData || []
@@ -322,9 +408,11 @@ async function runRequest(callback, initialLoad = false, requestKey = null, succ
   try {
     await callback()
     if (successMessage) showToast(successMessage)
+    return true
   } catch (error) {
     errorMessage.value = error.message || 'Ocurrió un error inesperado.'
     if (!initialLoad) showToast(errorMessage.value, 'error')
+    return false
   } finally {
     isLoading.value = false
     isSaving.value = false
@@ -475,7 +563,19 @@ function getCategoryCopy(currentCategory) {
               </div>
             </div>
 
-            <div v-if="entity && !isLoading" class="access-panel" :class="{ 'access-panel--verified': auth.authorized }">
+            <div v-if="isOffline" class="connectivity-banner" role="status">
+              <WifiOff :size="20" />
+              <span>Estás sin conexión. Puedes consultar lo que ya está visible, pero los cambios requieren internet.</span>
+            </div>
+
+            <div v-if="entityDeleted" class="deleted-state">
+              <Trash2 :size="34" />
+              <h3>Esta ficha fue eliminada</h3>
+              <p>La entidad, sus datos personalizados y sus accesos asociados ya no están almacenados.</p>
+            </div>
+
+            <template v-else>
+              <div v-if="entity && !isLoading" class="access-panel" :class="{ 'access-panel--verified': auth.authorized }">
               <component :is="auth.authorized ? ShieldCheck : LockKeyhole" :size="22" />
               <div>
                 <strong>{{ auth.authorized ? 'Acceso verificado' : 'Información protegida' }}</strong>
@@ -501,13 +601,22 @@ function getCategoryCopy(currentCategory) {
               >
                 <Mail :size="17" /> Enviar código
               </v-btn>
-            </div>
+              </div>
 
-            <div v-if="errorMessage" class="status-message status-message--error">
-              {{ errorMessage }}
-            </div>
+              <div v-if="errorMessage" class="status-message status-message--error">
+                <span>{{ errorMessage }}</span>
+                <v-btn
+                  v-if="!entity && routeContext.isValid"
+                  size="small"
+                  variant="tonal"
+                  :loading="isLoading"
+                  @click="loadEntity"
+                >
+                  <RefreshCw :size="16" /> Reintentar
+                </v-btn>
+              </div>
 
-            <div v-if="isLoading" class="status-message">Cargando información...</div>
+              <div v-if="isLoading" class="status-message">Cargando información...</div>
 
             <div v-if="!isLoading" class="inline-header">
               <span>{{ helperText }}</span>
@@ -720,7 +829,7 @@ function getCategoryCopy(currentCategory) {
                     variant="flat"
                     :aria-label="auth.authorized ? 'Eliminar' : 'Obtener código para eliminar'"
                     :title="auth.authorized ? 'Eliminar' : 'Obtén un código para eliminar'"
-                    @click="runProtectedAction(() => removeCustomData(draft))"
+                    @click="requestDeleteCustomData(draft)"
                   >
                     <AppIcon name="trash" />
                     <LockKeyhole v-if="!auth.authorized" class="action-lock-icon" :size="16" aria-hidden="true" />
@@ -809,6 +918,16 @@ function getCategoryCopy(currentCategory) {
                 </template>
               </v-btn>
             </form>
+
+              <button
+                v-if="entity && !isLoading"
+                class="privacy-link"
+                type="button"
+                @click="privacyDialog = true"
+              >
+                <ShieldCheck :size="17" /> Privacidad y tus datos
+              </button>
+            </template>
           </v-sheet>
         </section>
       </v-main>
@@ -835,6 +954,125 @@ function getCategoryCopy(currentCategory) {
             <v-btn color="primary" type="submit" variant="flat" :disabled="accessCode.length !== 6" :loading="savingKey === 'verify-access'">Verificar</v-btn>
           </div>
         </form>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="deleteDataDialog" max-width="430" persistent>
+      <v-card class="confirmation-dialog">
+        <div class="confirmation-dialog__icon confirmation-dialog__icon--danger">
+          <AlertTriangle :size="26" />
+        </div>
+        <h2>¿Eliminar este dato?</h2>
+        <p>
+          Se eliminará <strong>{{ pendingDeleteItem?.key }}</strong>. Esta acción no se puede deshacer.
+        </p>
+        <div class="dialog-actions">
+          <v-btn
+            variant="text"
+            :disabled="isSaving"
+            @click="deleteDataDialog = false; pendingDeleteItem = null"
+          >
+            Cancelar
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :loading="savingKey === `delete-${pendingDeleteItem?.id}`"
+            @click="confirmDeleteCustomData"
+          >
+            Eliminar dato
+          </v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="privacyDialog" max-width="560">
+      <v-card class="privacy-dialog">
+        <div class="privacy-dialog__heading">
+          <div class="access-dialog__icon"><ShieldCheck :size="26" /></div>
+          <div>
+            <h2>Privacidad y tus datos</h2>
+            <p>Información práctica sobre esta ficha.</p>
+          </div>
+        </div>
+
+        <div class="privacy-list">
+          <div>
+            <strong>Qué se guarda</strong>
+            <span>El identificador, los datos de contacto del responsable y los datos personalizados de la ficha.</span>
+          </div>
+          <div>
+            <strong>Datos protegidos</strong>
+            <span>Sus valores se almacenan cifrados y permanecen ocultos hasta verificar el código enviado al correo responsable.</span>
+          </div>
+          <div>
+            <strong>Acceso y permanencia</strong>
+            <span>La autorización dura 8 horas en este navegador. La información se conserva mientras la ficha siga activa.</span>
+          </div>
+        </div>
+
+        <div class="privacy-dialog__footer">
+          <v-btn variant="text" @click="privacyDialog = false">Cerrar</v-btn>
+          <v-btn
+            v-if="auth.authorized"
+            color="error"
+            variant="tonal"
+            @click="openEntityDeletion"
+          >
+            <Trash2 :size="17" /> Eliminar toda la ficha
+          </v-btn>
+          <v-btn
+            v-else-if="auth.canRequestCode"
+            color="primary"
+            variant="flat"
+            @click="openEntityDeletion"
+          >
+            <LockKeyhole :size="17" /> Verificar para administrar
+          </v-btn>
+        </div>
+        <p v-if="!auth.authorized && !auth.canRequestCode" class="privacy-readonly-note">
+          Esta ficha no tiene un correo responsable configurado. Solo el administrador puede eliminarla.
+        </p>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="deleteEntityDialog" max-width="500" persistent>
+      <v-card class="confirmation-dialog confirmation-dialog--entity">
+        <div class="confirmation-dialog__icon confirmation-dialog__icon--danger">
+          <Trash2 :size="26" />
+        </div>
+        <h2>Eliminar toda la ficha</h2>
+        <p>
+          Se borrarán permanentemente la entidad, sus datos personalizados, códigos y enlaces anteriores.
+          Para confirmar, escribe <strong>{{ identifierText }}</strong>.
+        </p>
+        <label class="confirmation-field">
+          <span>Identificador de la ficha</span>
+          <input
+            v-model="deleteEntityConfirmation"
+            :maxlength="IDENTIFICATION_MAX_LENGTH"
+            autocomplete="off"
+            :placeholder="identifierText"
+          />
+        </label>
+        <div class="dialog-actions">
+          <v-btn
+            variant="text"
+            :disabled="isSaving"
+            @click="deleteEntityDialog = false; deleteEntityConfirmation = ''"
+          >
+            Cancelar
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :disabled="deleteEntityConfirmation.trim() !== identifierText.trim()"
+            :loading="savingKey === 'delete-entity'"
+            @click="confirmDeleteEntity"
+          >
+            Eliminar definitivamente
+          </v-btn>
+        </div>
       </v-card>
     </v-dialog>
 
@@ -1407,6 +1645,10 @@ function getCategoryCopy(currentCategory) {
 }
 
 .status-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0 0 14px;
   padding: 12px 14px;
   color: #304d89;
@@ -1420,6 +1662,29 @@ function getCategoryCopy(currentCategory) {
   color: #9d171e;
   border-color: #ffd8dc;
   background: #fff3f4;
+}
+
+.status-message :deep(.v-btn__content),
+.privacy-dialog :deep(.v-btn__content) {
+  gap: 7px;
+}
+
+.connectivity-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 11px 13px;
+  color: #6b4d0b;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  background: #fff9e8;
+  border: 1px solid #eed89e;
+  border-radius: 10px;
+}
+
+.connectivity-banner svg {
+  flex: 0 0 auto;
 }
 
 .data-list {
@@ -1564,6 +1829,190 @@ function getCategoryCopy(currentCategory) {
 .access-dialog form > input { width: 100%; min-height: 54px; color: #071045; font-size: 1.5rem; font-weight: 800; letter-spacing: 8px; text-align: center; border: 1px solid #bfd7f2; border-radius: 9px; outline: none; }
 .access-dialog form > div { display: flex; justify-content: flex-end; gap: 8px; }
 
+.privacy-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin: 18px auto 0;
+  padding: 6px 8px;
+  color: #456491;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+
+.privacy-link:hover {
+  color: #0867e8;
+  background: #eef6ff;
+}
+
+.privacy-link:focus-visible {
+  outline: 3px solid rgba(8, 115, 255, 0.2);
+}
+
+.confirmation-dialog,
+.privacy-dialog {
+  padding: 24px;
+  color: #071045;
+}
+
+.confirmation-dialog {
+  text-align: center;
+}
+
+.confirmation-dialog__icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 12px;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.confirmation-dialog__icon--danger {
+  color: #c5232b;
+  background: #fff0f1;
+}
+
+.confirmation-dialog h2,
+.privacy-dialog h2 {
+  margin: 0;
+  color: #071045;
+  font-size: 1.35rem;
+}
+
+.confirmation-dialog > p {
+  margin: 8px 0 20px;
+  color: #607194;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirmation-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 20px;
+  color: #304d89;
+  font-size: 0.82rem;
+  font-weight: 750;
+  text-align: left;
+}
+
+.confirmation-field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  color: #071045;
+  font: inherit;
+  background: #fff;
+  border: 1px solid #c9dcf2;
+  border-radius: 9px;
+  outline: none;
+}
+
+.confirmation-field input:focus {
+  border-color: #0b7eff;
+  box-shadow: 0 0 0 4px rgba(11, 126, 255, 0.12);
+}
+
+.privacy-dialog__heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.privacy-dialog__heading .access-dialog__icon {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.privacy-dialog__heading p {
+  margin: 3px 0 0;
+  color: #607194;
+}
+
+.privacy-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #dce9f7;
+  border-radius: 10px;
+  background: #dce9f7;
+}
+
+.privacy-list > div {
+  display: grid;
+  gap: 3px;
+  padding: 13px 14px;
+  background: #fff;
+}
+
+.privacy-list strong {
+  color: #24477e;
+  font-size: 0.9rem;
+}
+
+.privacy-list span {
+  color: #607194;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.privacy-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.privacy-readonly-note {
+  margin: 12px 0 0;
+  color: #687998;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.deleted-state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 18px;
+  color: #607194;
+  text-align: center;
+  border: 1px dashed #c9dcee;
+  border-radius: 12px;
+  background: #f7fbff;
+}
+
+.deleted-state svg {
+  color: #687998;
+}
+
+.deleted-state h3,
+.deleted-state p {
+  margin: 0;
+}
+
+.deleted-state h3 {
+  color: #11154b;
+}
+
+.deleted-state p {
+  max-width: 520px;
+  line-height: 1.45;
+}
+
 .new-data-intro {
   display: grid;
   gap: 2px;
@@ -1628,6 +2077,52 @@ function getCategoryCopy(currentCategory) {
     padding: 8px 10px;
   }
 
+  .new-data-row,
+  .data-row:has(label) {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .new-data-row label:first-of-type,
+  .data-row label:first-of-type {
+    grid-column: 2 / -1;
+  }
+
+  .new-data-row label:nth-of-type(2),
+  .new-data-row label:nth-of-type(3),
+  .new-data-row .protection-toggle,
+  .data-row label:nth-of-type(2),
+  .data-row label:nth-of-type(3),
+  .data-row .protection-toggle {
+    grid-column: 2;
+  }
+
+  .new-data-row .row-icon,
+  .data-row:has(label) .row-icon {
+    grid-row: 1 / span 4;
+    align-self: center;
+  }
+
+  .new-data-row .save-button {
+    grid-row: 5;
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+
+  .data-row:has(label) .row-actions {
+    grid-row: 4;
+    grid-column: 3;
+  }
+
+  .inline-row--suggestion {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .inline-row--suggestion label:first-child,
+  .inline-row--suggestion .protection-toggle {
+    grid-column: 1 / -1;
+  }
+
   .suggestions-panel {
     margin-right: -4px;
     margin-left: -4px;
@@ -1660,6 +2155,27 @@ function getCategoryCopy(currentCategory) {
 
   .access-panel { grid-template-columns: auto minmax(0, 1fr); }
   .access-panel .access-button { grid-column: 1 / -1; width: 100%; }
+
+  .status-message {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .privacy-dialog,
+  .confirmation-dialog {
+    padding: 20px;
+  }
+
+  .privacy-dialog__footer,
+  .dialog-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .privacy-dialog__footer :deep(.v-btn),
+  .dialog-actions :deep(.v-btn) {
+    width: 100%;
+  }
 
   .inline-row,
   .data-row,

@@ -1,5 +1,6 @@
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto'
 import { getDb } from './_lib/db.mjs'
+import { purgeCategoryCache, purgeEntityCache } from './_lib/cache.mjs'
 import {
   HttpError,
   clearCookie,
@@ -65,7 +66,7 @@ export default async function handler(request) {
 
     throw new HttpError(404, 'Operación administrativa no encontrada.')
   } catch (error) {
-    return handleError(error)
+    return handleError(asDatabaseError(error))
   }
 }
 
@@ -164,7 +165,9 @@ async function saveCategory(db, category) {
   if (code.length > CATEGORY_CODE_MAX_LENGTH) throw new HttpError(400, `Código no puede superar ${CATEGORY_CODE_MAX_LENGTH} caracteres.`)
 
   if (category.id) {
-    await db.execute({ sql: 'UPDATE Categorias SET name = ?, code = ?, active = ? WHERE id = ?', args: [name, code, active, validId(category.id, 'categoría')] })
+    const categoryId = validId(category.id, 'categoría')
+    await db.execute({ sql: 'UPDATE Categorias SET name = ?, code = ?, active = ? WHERE id = ?', args: [name, code, active, categoryId] })
+    await purgeCategoryCache(categoryId)
   } else {
     await db.execute({ sql: 'INSERT INTO Categorias (name, code, active) VALUES (?, ?, ?)', args: [name, code, active] })
   }
@@ -213,11 +216,14 @@ async function saveSuggestion(db, suggestion) {
   } else {
     await db.execute({ sql: 'INSERT INTO CategoriaSugerencias (categoriaID, name, active, sort_order, data_type) VALUES (?, ?, ?, ?, ?)', args: [categoryId, name, active, sortOrder, dataType] })
   }
+  await purgeCategoryCache(categoryId)
   return json({ ok: true })
 }
 
 async function deleteSuggestion(db, payload) {
-  await db.execute({ sql: 'DELETE FROM CategoriaSugerencias WHERE id = ? AND categoriaID = ?', args: [validId(payload.id, 'sugerencia'), validId(payload.categoryId, 'categoría')] })
+  const categoryId = validId(payload.categoryId, 'categoría')
+  await db.execute({ sql: 'DELETE FROM CategoriaSugerencias WHERE id = ? AND categoriaID = ?', args: [validId(payload.id, 'sugerencia'), categoryId] })
+  await purgeCategoryCache(categoryId)
   return json({ ok: true })
 }
 
@@ -280,6 +286,7 @@ async function updateEntity(db, payload) {
     args: [identification, categoryId, owner.name, owner.email, owner.phone, emailChanged ? 1 : 0, id],
   })
   if (emailChanged) await db.execute({ sql: 'DELETE FROM EntityAccessCodes WHERE entity_id = ?', args: [id] })
+  await purgeEntityCache(id)
   return json({ ok: true })
 }
 
@@ -292,6 +299,7 @@ async function regenerateEntity(db, payload) {
     { sql: 'DELETE FROM EntityAccessCodes WHERE entity_id = ?', args: [id] },
     { sql: 'UPDATE Entidades SET token = ?, short_code = ?, auth_version = auth_version + 1 WHERE id = ?', args: [token, shortCode, id] },
   ], 'write')
+  await purgeEntityCache(id)
   return json({ token, shortCode })
 }
 
@@ -302,6 +310,7 @@ async function deleteEntity(db, payload) {
     { sql: 'DELETE FROM EntityAliases WHERE entity_id = ?', args: [id] },
     { sql: 'DELETE FROM Entidades WHERE id = ?', args: [id] },
   ], 'write')
+  await purgeEntityCache(id)
   return json({ ok: true })
 }
 
@@ -366,7 +375,7 @@ function validatePassword(value) {
 async function ensureUniqueIdentification(db, identification, excludedId = null) {
   const result = await db.execute({
     sql: `SELECT 1 FROM Entidades
-          WHERE LOWER(Identificacion) = LOWER(?) AND (? IS NULL OR id <> ?)
+          WHERE LOWER(TRIM(Identificacion)) = LOWER(TRIM(?)) AND (? IS NULL OR id <> ?)
           LIMIT 1`,
     args: [identification, excludedId, excludedId],
   })
@@ -396,4 +405,36 @@ function asBadRequest(callback) {
   } catch (error) {
     throw new HttpError(400, error.message)
   }
+}
+
+function asDatabaseError(error) {
+  if (error instanceof HttpError) return error
+
+  const message = String(error?.message || '')
+  if (message.includes('idx_entidades_identification_normalized')) {
+    return new HttpError(409, 'Ya existe una entidad con esa identificación.')
+  }
+  if (message.includes('idx_suggestions_name_normalized') || message.includes('CategoriaSugerencias.categoriaID')) {
+    return new HttpError(409, 'Esta categoría ya tiene una sugerencia con ese nombre.')
+  }
+  if (message.includes('Categorias.code')) {
+    return new HttpError(409, 'Ya existe una categoría con ese código.')
+  }
+  if (message.includes('Entidades.token') || message.includes('Entidades.short_code')) {
+    return new HttpError(409, 'El token o código corto ya está en uso.')
+  }
+  if (message.includes('El token o código corto ya existe en otra ruta.')) {
+    return new HttpError(409, 'El token o código corto ya existe en otra ruta.')
+  }
+  if (message.includes('El alias ya existe como token o código corto.')) {
+    return new HttpError(409, 'El alias ya existe como token o código corto.')
+  }
+  const validationMessages = [
+    'Categoría inválida o sin normalizar.',
+    'Sugerencia inválida o sin normalizar.',
+    'Entidad inválida o sin normalizar.',
+    'Alias inválido o sin normalizar.',
+  ]
+  const validationMessage = validationMessages.find((candidate) => message.includes(candidate))
+  return validationMessage ? new HttpError(400, validationMessage) : error
 }

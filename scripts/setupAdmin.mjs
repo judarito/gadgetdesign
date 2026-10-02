@@ -1,6 +1,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
+import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const url = env.TURSO_URL || env.VITE_TURSO_URL
@@ -172,6 +173,8 @@ await db.execute(
 await db.execute(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_short_code ON Entidades (short_code)',
 )
+
+await applyDataIntegrityConstraints(db)
 
 const existing = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1 LIMIT 1')
 

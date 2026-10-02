@@ -8,9 +8,13 @@ export const CUSTOM_DATA_JSON_MAX_LENGTH = 5000
 
 const ROUTE_VALUE_PATTERN = /^[A-Za-z0-9_-]+$/
 const CONTROL_CHARS_PATTERN = /[\u0000-\u001f\u007f-\u009f]/g
+const INVISIBLE_CHARS_PATTERN = /[\u200b-\u200d\u2060\ufeff]/g
 
 export function sanitizeText(value) {
-  return String(value ?? '').replace(CONTROL_CHARS_PATTERN, '').trim()
+  return String(value ?? '')
+    .replace(CONTROL_CHARS_PATTERN, '')
+    .replace(INVISIBLE_CHARS_PATTERN, '')
+    .trim()
 }
 
 export function sanitizeCustomDataInput(payload) {

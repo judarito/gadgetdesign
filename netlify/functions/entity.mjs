@@ -1,8 +1,14 @@
 import { getDb } from './_lib/db.mjs'
 import { sendAccessCode } from './_lib/email.mjs'
 import {
+  privateEntityCacheHeaders,
+  publicEntityCacheHeaders,
+  purgeEntityCache,
+} from './_lib/cache.mjs'
+import {
   HttpError,
   clearCookie,
+  getCookie,
   handleError,
   json,
   readJson,
@@ -37,7 +43,12 @@ export default async function handler(request) {
     const action = url.searchParams.get('action') || 'context'
 
     if (request.method === 'GET' && action === 'context') {
-      return json(await getContext(request, routeInput(url.searchParams)))
+      const context = await getContext(request, routeInput(url.searchParams))
+      const isAnonymous = !getCookie(request, ENTITY_COOKIE)
+      const cacheHeaders = isAnonymous && context.entity
+        ? publicEntityCacheHeaders(context.entity.id, context.category.id)
+        : privateEntityCacheHeaders()
+      return json(context, 200, cacheHeaders)
     }
     if (request.method === 'POST' && action === 'request-code') {
       return await requestCode(request, await readJson(request))
@@ -56,6 +67,9 @@ export default async function handler(request) {
     }
     if (request.method === 'DELETE' && action === 'delete-data') {
       return await mutateData(request, await readJson(request), 'delete')
+    }
+    if (request.method === 'DELETE' && action === 'delete-entity') {
+      return await deleteCurrentEntity(request, await readJson(request))
     }
 
     throw new HttpError(404, 'Operación no encontrada.')
@@ -138,17 +152,27 @@ async function requestCode(request, payload) {
   }
 
   const code = generateOtp()
-  await db.execute({
+  const insertedCode = await db.execute({
     sql: `INSERT INTO EntityAccessCodes
           (entity_id, code_hash, expires_at, attempts, consumed, request_ip, created_at)
           VALUES (?, ?, ?, 0, 0, ?, ?)`,
     args: [entity.id, hashOtp(entity.id, code), now + OTP_SECONDS, ip, now],
   })
-  await sendAccessCode({
-    to: entity.ownerEmail,
-    code,
-    identification: entity.identificacion,
-  })
+  try {
+    await sendAccessCode({
+      to: entity.ownerEmail,
+      code,
+      identification: entity.identificacion,
+    })
+  } catch (error) {
+    if (insertedCode.lastInsertRowid !== undefined) {
+      await db.execute({
+        sql: 'DELETE FROM EntityAccessCodes WHERE id = ?',
+        args: [insertedCode.lastInsertRowid],
+      }).catch(() => {})
+    }
+    throw error
+  }
 
   return json({ ok: true, emailHint: maskEmail(entity.ownerEmail) })
 }
@@ -219,6 +243,9 @@ async function mutateData(request, payload, operation) {
       : item)
   } else {
     const itemId = String(payload.itemId || '')
+    if (!customData.some((item) => item.id === itemId)) {
+      throw new HttpError(404, 'No se encontró el dato personalizado.')
+    }
     customData = customData.filter((item) => item.id !== itemId)
   }
 
@@ -227,7 +254,33 @@ async function mutateData(request, payload, operation) {
     sql: 'UPDATE Entidades SET custom_data = ? WHERE id = ?',
     args: [serialized, entity.id],
   })
+  await purgeEntityCache(entity.id)
   return json(await getContext(request, payload))
+}
+
+async function deleteCurrentEntity(request, payload) {
+  const db = getDb()
+  const { entity } = await findEntity(db, payload)
+  if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
+  requireEntitySession(request, entity)
+
+  const confirmation = String(payload.confirmation || '').trim()
+  if (confirmation !== entity.identificacion.trim()) {
+    throw new HttpError(400, 'Escribe el identificador exactamente como aparece en la ficha.')
+  }
+
+  await db.batch([
+    { sql: 'DELETE FROM EntityAccessCodes WHERE entity_id = ?', args: [entity.id] },
+    { sql: 'DELETE FROM EntityAliases WHERE entity_id = ?', args: [entity.id] },
+    { sql: 'DELETE FROM Entidades WHERE id = ?', args: [entity.id] },
+  ], 'write')
+  await purgeEntityCache(entity.id)
+
+  return json(
+    { ok: true },
+    200,
+    { 'set-cookie': clearCookie(ENTITY_COOKIE) },
+  )
 }
 
 function secureItem(item, payload) {

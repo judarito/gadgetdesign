@@ -1,6 +1,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
+import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const url = env.LOCAL_TURSO_URL || 'file:/tmp/gadgetdesign-local.db'
@@ -107,6 +108,8 @@ await db.execute({
 
 await db.execute('DELETE FROM EntityAccessCodes')
 await db.execute('DELETE FROM AdminLoginAttempts')
+
+await applyDataIntegrityConstraints(db)
 
 const credential = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1')
 if (!credential.rows.length) {

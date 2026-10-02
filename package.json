@@ -9,12 +9,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "setup:local": "node scripts/setupLocal.mjs",
-    "test:functions": "node scripts/testFunctions.mjs",
+    "test:functions": "npm run setup:local && node scripts/testFunctions.mjs",
     "setup:admin": "node scripts/setupAdmin.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
     "@lucide/vue": "^1.48.0",
+    "@netlify/functions": "^6.0.2",
     "qrcode": "^1.5.4",
     "three": "^0.186.1",
     "vue": "^3.5.43",
