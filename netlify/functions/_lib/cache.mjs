@@ -91,8 +91,9 @@ async function purgeTags(tags) {
  * nunca —ni en producción— y cada escritura dejaba la lectura pública con datos
  * viejos hasta que expiraba el TTL de 60 segundos.
  *
- * `NETLIFY_LOCAL` sí lo pone el CLI en local, y el token está en el runtime
- * desplegado.
+ * En la práctica quien decide es el token, que sí está en el runtime desplegado
+ * y no en el `.env` local. `NETLIFY_LOCAL` se mantiene como salvaguarda para
+ * entornos que sí la definan; este CLI no lo hace.
  */
 function hasCdnCache() {
   return !process.env.NETLIFY_LOCAL && canPurgeCache()
