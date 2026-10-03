@@ -183,6 +183,11 @@ netlify logs --function client --since 5m
 La ingesta tarda unos 20 segundos, así que si acabas de pedir el código espera un
 poco o usa `--follow`.
 
+Aviso: la canalización de logs de Netlify **pierde alguna línea**. Se ha observado
+un código creado en la base cuyo aviso nunca apareció, con tres vecinos sí
+publicados. Si pides un código y no lo ves, vuelve a pedirlo en lugar de dar por
+hecho que el envío falló.
+
 Los *deploy previews* de pull request están **desactivados en el sitio de
 producción** (`build_settings.skip_prs`): así el código de una rama sin fusionar
 nunca se ejecuta contra la base de datos real. Un preview de producción usa las
