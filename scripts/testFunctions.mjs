@@ -2,8 +2,14 @@ import { spawn } from 'node:child_process'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
 import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
+import { publicEntityCacheHeaders } from '../netlify/functions/_lib/cache.mjs'
 
 const env = loadEnv('', process.cwd(), '')
+
+// La caché de CDN solo se activa si hay con qué invalidarla. El servidor de
+// pruebas corre con un token ficticio para poder comprobar el camino cacheado;
+// el camino sin token se comprueba más abajo, llamando al módulo directamente.
+process.env.NETLIFY_PURGE_API_TOKEN ??= 'token-de-prueba'
 
 const server = spawn('npm', ['run', 'dev'], {
   cwd: process.cwd(),
@@ -43,6 +49,17 @@ try {
     'La lectura pública no debe servir contenido vencido mientras revalida.')
   assert(publicResult.response.headers.get('netlify-cache-tag') === 'entity-1,category-1',
     'La lectura pública debe etiquetarse por entidad y categoría.')
+
+  // Sin token de purga la caché no se puede invalidar, así que no debe usarse:
+  // si no, cada edición tardaría hasta 60 s en verse.
+  const tokenDePurga = process.env.NETLIFY_PURGE_API_TOKEN
+  delete process.env.NETLIFY_PURGE_API_TOKEN
+  const sinPurga = publicEntityCacheHeaders(1, 1)
+  assert(sinPurga['netlify-cdn-cache-control'] === 'no-store',
+    'Sin token de purga la lectura pública no debe cachearse en el CDN.')
+  assert(!sinPurga['netlify-cache-tag'],
+    'Sin token de purga no tiene sentido etiquetar una respuesta que no se cachea.')
+  process.env.NETLIFY_PURGE_API_TOKEN = tokenDePurga
 
   await expectStatus(() => request('entity', 'create-data', {
     method: 'POST', body: { ...route, data: { key: 'Sin permiso', value: 'No', dataType: 'text' } },
@@ -480,6 +497,7 @@ try {
 
   console.log('✓ Lectura pública enmascarada')
   console.log('✓ Caché público durable y sesiones con no-store')
+  console.log('✓ Sin token de purga la lectura pública no se cachea')
   console.log('✓ OTP local y cookie HttpOnly')
   console.log('✓ Revelado autorizado')
   console.log('✓ Cifrado AES-GCM en almacenamiento')

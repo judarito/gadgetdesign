@@ -9,7 +9,24 @@ const CLIENT_SESSION_COOKIE = 'gd_client_session'
 const CACHEABLE_CONTEXT_VARY =
   `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}|${CLIENT_SESSION_COOKIE}`
 
+/**
+ * La caché de CDN solo es segura si podemos invalidarla.
+ *
+ * `purgeCache()` exige `NETLIFY_PURGE_API_TOKEN` en el entorno y lanza si no
+ * está. Sin él, la purga falla en silencio (se registra y se sigue), así que
+ * cada escritura dejaba la lectura pública con datos viejos hasta que expiraba
+ * el TTL: hasta 60 segundos viendo una ficha ya borrada o un dato ya editado.
+ *
+ * Mientras el token no esté configurado se responde `no-store`: se pierde algo
+ * de caché y se gana que lo que se lee sea lo que hay.
+ */
+function canPurgeCache() {
+  return Boolean(process.env.NETLIFY_PURGE_API_TOKEN)
+}
+
 export function publicEntityCacheHeaders(entityId, categoryId) {
+  if (!canPurgeCache()) return privateEntityCacheHeaders()
+
   return {
     'cache-control': 'no-store',
     'netlify-cdn-cache-control': `public, durable, s-maxage=${PUBLIC_CACHE_SECONDS}`,
