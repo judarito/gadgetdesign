@@ -105,9 +105,9 @@ try {
     args: ['Dato\u200Binvisible'],
   }), 'La base debe rechazar caracteres invisibles en sugerencias.')
   await expectDbFailure(() => db.execute({
-    sql: 'UPDATE Entidades SET owner_email = ? WHERE id = 1',
+    sql: 'UPDATE Clientes SET email = ? WHERE id = 1',
     args: ['Cliente@Example.com'],
-  }), 'La base debe exigir correos normalizados.')
+  }), 'La base debe exigir correos normalizados en los clientes.')
   await expectDbFailure(() => db.execute({
     sql: 'UPDATE Entidades SET Identificacion = ? WHERE id = 1',
     args: ['X'.repeat(201)],
@@ -136,6 +136,12 @@ try {
   await expectStatus(() => request('entity', 'delete-data', {
     method: 'DELETE', cookie: entityCookie, body: { ...route, itemId: createdItem.id },
   }), 404, 'Eliminar un dato inexistente debe informar el conflicto.')
+
+  const entityColumns = (await db.execute('PRAGMA table_info(Entidades)')).rows.map((row) => row.name)
+  const legacyColumns = ['owner_name', 'owner_email', 'owner_phone'].filter((name) => entityColumns.includes(name))
+  assert(legacyColumns.length === 0,
+    `Las columnas heredadas del propietario ya no deben existir: ${legacyColumns.join(', ')}.`)
+  assert(entityColumns.includes('clienteID'), 'La ficha debe apuntar a su cliente.')
   db.close()
 
   const adminSession = await request('admin', 'session')
@@ -154,7 +160,7 @@ try {
   assert(entities.items[0].clientEmail === 'cliente@example.com', 'El administrador debe recibir los datos de contacto.')
   await expectStatus(() => request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
-    body: { identification: 'local-001', categoryId: 1, ownerName: '', ownerEmail: '', ownerPhone: '' },
+    body: { identification: 'local-001', categoryId: 1, clienteId: null },
   }), 409, 'No debe permitir identificaciones duplicadas.')
 
   // --- Modelo de clientes -------------------------------------------------
@@ -166,6 +172,25 @@ try {
   await expectStatus(() => request('admin', 'delete-client', {
     method: 'DELETE', cookie: adminCookie, body: { id: 1 },
   }), 409, 'No debe eliminar un cliente que tenga fichas asignadas.')
+
+  // Vía de compatibilidad: sin `clienteId`, un correo suelto crea el cliente.
+  const implicit = await request('admin', 'create-entity', {
+    method: 'POST', cookie: adminCookie,
+    body: {
+      identification: 'IMPLICITA-01',
+      categoryId: 1,
+      ownerName: 'Dueño Implícito',
+      ownerEmail: 'implicito@example.com',
+      ownerPhone: '+57 300 111 2233',
+    },
+  })
+  assert(Number.isInteger(implicit.clienteId),
+    'Un correo suelto debe crear el cliente y vincular la ficha.')
+  const implicitClients = await request('admin', 'clients', {
+    cookie: adminCookie, query: { search: 'implicito' },
+  })
+  assert(implicitClients.items.length === 1 && implicitClients.items[0].phone === '+57 300 111 2233',
+    'El cliente creado por la vía de compatibilidad debe guardar el celular.')
 
   const newClient = await request('admin', 'save-client', {
     method: 'POST', cookie: adminCookie,

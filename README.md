@@ -93,6 +93,25 @@ Ejecútala de forma controlada antes de desplegar cambios de esquema. Para
 apuntarla a la base de pruebas, exporta antes `.env.dev.local` como se explica
 en [Entorno de pruebas](#entorno-de-pruebas-rama-dev).
 
+### Retirar las columnas heredadas del propietario
+
+El dueño de una ficha vive ahora en `Clientes`. Las columnas
+`Entidades.owner_name`, `owner_email` y `owner_phone` quedaron como residuo y se
+eliminan con un comando aparte, porque es destructivo y solo tiene sentido
+cuando ya corre el código que lee el dueño en `Clientes`:
+
+```sh
+npm run setup:admin          # aditivo: crea Clientes y vincula las fichas
+npm run setup:drop-legacy    # destructivo: elimina las columnas heredadas
+```
+
+El orden importa, y el script se protege solo: se niega a borrar si encuentra
+una ficha con correo heredado y sin cliente vinculado, y recrea antes los
+triggers porque SQLite bloquea `DROP COLUMN` si algún trigger nombra la columna.
+
+En un despliegue, la secuencia segura es: `setup:admin` antes de fusionar el PR,
+y `setup:drop-legacy` después de que el código nuevo esté desplegado.
+
 ## URL de uso
 
 La URL pública usa el código corto de la entidad:

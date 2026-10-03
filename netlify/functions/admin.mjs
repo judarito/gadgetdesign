@@ -447,14 +447,9 @@ async function createEntity(db, payload) {
   const shortCode = await generateUniqueShortCode(db)
   await db.execute({
     sql: `INSERT INTO Entidades
-          (Identificacion, token, short_code, categoriaID, custom_data,
-           owner_name, owner_email, owner_phone, auth_version, clienteID)
-          VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 1, ?)`,
-    args: [
-      identification, token, shortCode, categoryId,
-      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
-      cliente?.id ?? null,
-    ],
+          (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID)
+          VALUES (?, ?, ?, ?, '[]', 1, ?)`,
+    args: [identification, token, shortCode, categoryId, cliente?.id ?? null],
   })
   return json({ token, shortCode, clienteId: cliente?.id ?? null })
 }
@@ -511,14 +506,9 @@ async function bulkCreateEntities(db, payload) {
   const shortCodes = await generateUniqueShortCodes(db, identifications.length)
   const rows = identifications.map((identification, index) => ({
     sql: `INSERT INTO Entidades
-          (Identificacion, token, short_code, categoriaID, custom_data,
-           owner_name, owner_email, owner_phone, auth_version, clienteID)
-          VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 1, ?)`,
-    args: [
-      identification, crypto.randomUUID(), shortCodes[index], categoryId,
-      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
-      cliente?.id ?? null,
-    ],
+          (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID)
+          VALUES (?, ?, ?, ?, '[]', 1, ?)`,
+    args: [identification, crypto.randomUUID(), shortCodes[index], categoryId, cliente?.id ?? null],
   }))
 
   await db.batch(rows, 'write')
@@ -545,14 +535,9 @@ async function updateEntity(db, payload) {
 
   await db.execute({
     sql: `UPDATE Entidades
-          SET Identificacion = ?, categoriaID = ?,
-              owner_name = ?, owner_email = ?, owner_phone = ?, clienteID = ?
+          SET Identificacion = ?, categoriaID = ?, clienteID = ?
           WHERE id = ?`,
-    args: [
-      identification, categoryId,
-      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
-      cliente?.id ?? null, id,
-    ],
+    args: [identification, categoryId, cliente?.id ?? null, id],
   })
 
   await purgeEntityCache(id)

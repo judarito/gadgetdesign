@@ -75,17 +75,15 @@ if (!hasShortCode) {
   await db.execute('ALTER TABLE Entidades ADD COLUMN short_code TEXT')
 }
 
-const entitySecurityColumns = [
-  ['owner_name', 'TEXT'],
-  ['owner_email', 'TEXT'],
-  ['owner_phone', 'TEXT'],
-  ['auth_version', 'INTEGER NOT NULL DEFAULT 1'],
-]
+// owner_name/owner_email/owner_phone ya no se crean: el dueño vive en Clientes.
+// Las bases que vienen de antes conservan esas columnas hasta que se ejecute
+// `npm run setup:drop-legacy`.
+const hasLegacyOwnerColumns = entityColumns.rows.some((column) => column.name === 'owner_email')
 
-for (const [name, definition] of entitySecurityColumns) {
-  if (!entityColumns.rows.some((column) => column.name === name)) {
-    await db.execute(`ALTER TABLE Entidades ADD COLUMN ${name} ${definition}`)
-  }
+// auth_version sigue existiendo como columna histórica: la sesión ya no se
+// revoca por ficha, pero la columna es NOT NULL y los triggers la validan.
+if (!entityColumns.rows.some((column) => column.name === 'auth_version')) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1')
 }
 
 await db.execute(`CREATE TABLE IF NOT EXISTS EntityAccessCodes (
@@ -160,11 +158,14 @@ if (!entityColumns.rows.some((column) => column.name === 'clienteID')) {
 
 await db.execute('CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)')
 
-// Alta de clientes a partir de los dueños ya existentes. Agrupa por correo
-// normalizado y, para cada campo, toma el valor NO VACÍO más reciente de
-// cualquier ficha del grupo: la última ficha creada puede tener el nombre
-// vacío y no debe pisar el que ya había.
-await db.execute(`INSERT INTO Clientes (name, email, phone)
+// Alta de clientes a partir de los dueños ya existentes. Solo aplica a bases
+// que todavía tienen las columnas heredadas; en una base nueva no hay nada que
+// migrar y esas columnas ya no se crean.
+if (hasLegacyOwnerColumns) {
+  // Agrupa por correo normalizado y, para cada campo, toma el valor NO VACÍO
+  // más reciente de cualquier ficha del grupo: la última ficha creada puede
+  // tener el nombre vacío y no debe pisar el que ya había.
+  await db.execute(`INSERT INTO Clientes (name, email, phone)
 SELECT
   COALESCE(
     (SELECT NULLIF(TRIM(e2.owner_name), '')
@@ -195,9 +196,9 @@ WHERE e.owner_email IS NOT NULL
     WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(e.owner_email))
   )`)
 
-// Vincula cada ficha con su cliente. Las fichas sin correo quedan en NULL y
-// siguen en modo solo lectura.
-await db.execute(`UPDATE Entidades
+  // Vincula cada ficha con su cliente. Las fichas sin correo quedan en NULL y
+  // siguen en modo solo lectura.
+  await db.execute(`UPDATE Entidades
 SET clienteID = (
   SELECT c.id FROM Clientes c
   WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(Entidades.owner_email))
@@ -205,6 +206,7 @@ SET clienteID = (
 WHERE clienteID IS NULL
   AND owner_email IS NOT NULL
   AND TRIM(owner_email) <> ''`)
+}
 
 async function generateUniqueShortCode() {
   let shortCode

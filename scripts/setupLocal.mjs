@@ -31,9 +31,6 @@ await db.batch([
     categoriaID INTEGER NOT NULL,
     custom_data TEXT NOT NULL DEFAULT '[]',
     short_code TEXT UNIQUE,
-    owner_name TEXT,
-    owner_email TEXT,
-    owner_phone TEXT,
     auth_version INTEGER NOT NULL DEFAULT 1,
     clienteID INTEGER REFERENCES Clientes (id),
     FOREIGN KEY (categoriaID) REFERENCES Categorias (id)
@@ -131,19 +128,15 @@ const sampleData = JSON.stringify([
 ])
 await db.execute({
   sql: `INSERT INTO Entidades
-        (id, Identificacion, token, categoriaID, custom_data, short_code,
-         owner_name, owner_email, owner_phone, auth_version, clienteID)
+        (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version, clienteID)
         VALUES (1, 'LOCAL-001', '11111111-1111-4111-8111-111111111111', 1, ?,
-                'Local001', 'Cliente Local', 'cliente@example.com', '+57 300 000 0000', 1, 1)
+                'Local001', 1, 1)
         ON CONFLICT(id) DO UPDATE SET
           Identificacion = excluded.Identificacion,
           token = excluded.token,
           categoriaID = excluded.categoriaID,
           custom_data = excluded.custom_data,
           short_code = excluded.short_code,
-          owner_name = excluded.owner_name,
-          owner_email = excluded.owner_email,
-          owner_phone = excluded.owner_phone,
           auth_version = excluded.auth_version,
           clienteID = excluded.clienteID`,
   args: [sampleData],
@@ -154,6 +147,17 @@ await db.execute('DELETE FROM ClientAccessCodes')
 await db.execute('DELETE FROM AdminLoginAttempts')
 
 await applyDataIntegrityConstraints(db)
+
+// La base local puede venir de antes con las columnas heredadas. Se eliminan
+// aquí para que el entorno de pruebas refleje el esquema objetivo: si el código
+// volviera a necesitarlas, las pruebas fallarían.
+const legacyColumns = ['owner_name', 'owner_email', 'owner_phone']
+for (const name of legacyColumns) {
+  const info = await db.execute('PRAGMA table_info(Entidades)')
+  if (info.rows.some((column) => column.name === name)) {
+    await db.execute(`ALTER TABLE Entidades DROP COLUMN ${name}`)
+  }
+}
 
 const credential = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1')
 if (!credential.rows.length) {

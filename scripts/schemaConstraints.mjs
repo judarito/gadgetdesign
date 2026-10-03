@@ -151,10 +151,7 @@ async function normalizeExistingData(db) {
     `UPDATE Entidades
      SET Identificacion = ${cleanText('Identificacion')},
          token = ${cleanText('token')},
-         short_code = CASE WHEN short_code IS NULL THEN NULL ELSE ${cleanText('short_code')} END,
-         owner_name = CASE WHEN owner_name IS NULL THEN NULL ELSE ${cleanText('owner_name')} END,
-         owner_email = CASE WHEN owner_email IS NULL THEN NULL ELSE LOWER(${cleanText('owner_email')}) END,
-         owner_phone = CASE WHEN owner_phone IS NULL THEN NULL ELSE ${cleanText('owner_phone')} END`,
+         short_code = CASE WHEN short_code IS NULL THEN NULL ELSE ${cleanText('short_code')} END`,
     `UPDATE EntityAliases SET code = ${cleanText('code')}`,
     `UPDATE Clientes
      SET name = ${cleanText('name')},
@@ -182,9 +179,6 @@ async function assertExistingDataIsValid(db) {
             WHERE Identificacion = '' OR LENGTH(Identificacion) > 200
                OR token = '' OR LENGTH(token) > 40 OR token GLOB '*[^A-Za-z0-9_-]*'
                OR (short_code IS NOT NULL AND (short_code = '' OR LENGTH(short_code) > 8 OR short_code GLOB '*[^A-Za-z0-9_-]*'))
-               OR LENGTH(COALESCE(owner_name, '')) > 100
-               OR LENGTH(COALESCE(owner_email, '')) > 254
-               OR LENGTH(COALESCE(owner_phone, '')) > 30
                OR LENGTH(COALESCE(custom_data, '')) > 5000
                OR auth_version < 1 LIMIT 1`,
       message: 'Hay una entidad con campos vacíos, demasiado largos o inválidos.',
@@ -255,12 +249,6 @@ async function createValidationTriggers(db) {
       NEW.short_code = '' OR NEW.short_code <> TRIM(NEW.short_code)
       OR LENGTH(NEW.short_code) > 8 OR NEW.short_code GLOB '*[^A-Za-z0-9_-]*'
     ))
-    OR LENGTH(COALESCE(NEW.owner_name, '')) > 100
-    OR (NEW.owner_name IS NOT NULL AND NEW.owner_name <> TRIM(NEW.owner_name))
-    OR LENGTH(COALESCE(NEW.owner_email, '')) > 254
-    OR (NEW.owner_email IS NOT NULL AND NEW.owner_email <> LOWER(TRIM(NEW.owner_email)))
-    OR LENGTH(COALESCE(NEW.owner_phone, '')) > 30
-    OR (NEW.owner_phone IS NOT NULL AND NEW.owner_phone <> TRIM(NEW.owner_phone))
     OR LENGTH(COALESCE(NEW.custom_data, '')) > 5000
     OR NEW.auth_version < 1`
   const aliasValidation = `
