@@ -1,6 +1,8 @@
 # Modelo de clientes y portal del cliente
 
-Estado: **propuesta para revisión**. No hay código ni migración aplicada.
+Estado: **fase 1 implementada** (tabla `Clientes`, migración, autorización por
+pertenencia, CRUD en el panel y creación masiva). Fases 2 (portal) y 3 (retirar
+`owner_*`) pendientes.
 
 ## Problema
 

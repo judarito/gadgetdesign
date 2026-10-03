@@ -6,14 +6,22 @@ export class HttpError extends Error {
 }
 
 export function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      ...headers,
-    },
+  const merged = new Headers({
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
   })
+
+  for (const [key, value] of Object.entries(headers)) {
+    // Un array permite emitir varias cabeceras con el mismo nombre, que es lo
+    // que hace falta para borrar las dos cookies a la vez.
+    if (Array.isArray(value)) {
+      for (const item of value) merged.append(key, item)
+    } else if (value !== undefined && value !== null) {
+      merged.set(key, value)
+    }
+  }
+
+  return new Response(JSON.stringify(data), { status, headers: merged })
 }
 
 export function handleError(error) {

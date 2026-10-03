@@ -1,6 +1,6 @@
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto'
 import { getDb } from './_lib/db.mjs'
-import { purgeCategoryCache, purgeEntityCache } from './_lib/cache.mjs'
+import { purgeCategoryCache, purgeEntityCache, purgeEntityCaches } from './_lib/cache.mjs'
 import {
   HttpError,
   clearCookie,
@@ -18,7 +18,7 @@ import {
 } from './_lib/security.mjs'
 import { getCookie } from './_lib/http.mjs'
 import { normalizeDataType } from '../../src/services/dataTypes.js'
-import { generateUniqueShortCode } from '../../src/services/shortCode.js'
+import { generateUniqueShortCode, generateUniqueShortCodes } from '../../src/services/shortCode.js'
 import {
   CATEGORY_CODE_MAX_LENGTH,
   IDENTIFICATION_MAX_LENGTH,
@@ -28,10 +28,15 @@ import {
 
 const CATEGORY_NAME_MAX_LENGTH = 50
 const SUGGESTION_NAME_MAX_LENGTH = 50
+const CLIENT_NAME_MAX_LENGTH = 100
+const CLIENT_EMAIL_MAX_LENGTH = 254
+const CLIENT_PHONE_MAX_LENGTH = 30
 const ADMIN_PASSWORD_MIN_LENGTH = 12
 const ADMIN_PASSWORD_MAX_LENGTH = 128
 const DEFAULT_PAGE_SIZE = 10
 const MAX_PAGE_SIZE = 50
+const BULK_ENTITY_LIMIT = 200
+const BULK_PREFIX_MAX_LENGTH = 150
 
 export default async function handler(request) {
   try {
@@ -58,8 +63,13 @@ export default async function handler(request) {
     if (request.method === 'GET' && action === 'suggestions') return json(await listSuggestions(db, url.searchParams))
     if (request.method === 'POST' && action === 'save-suggestion') return await saveSuggestion(db, body)
     if (request.method === 'DELETE' && action === 'delete-suggestion') return await deleteSuggestion(db, body)
+    if (request.method === 'GET' && action === 'clients') return json(await listClients(db, url.searchParams))
+    if (request.method === 'GET' && action === 'client-options') return json(await listClientOptions(db))
+    if (request.method === 'POST' && action === 'save-client') return await saveClient(db, body)
+    if (request.method === 'DELETE' && action === 'delete-client') return await deleteClient(db, body)
     if (request.method === 'GET' && action === 'entities') return json(await listEntities(db, url.searchParams))
     if (request.method === 'POST' && action === 'create-entity') return await createEntity(db, body)
+    if (request.method === 'POST' && action === 'bulk-create-entities') return await bulkCreateEntities(db, body)
     if (request.method === 'PATCH' && action === 'update-entity') return await updateEntity(db, body)
     if (request.method === 'POST' && action === 'regenerate-entity') return await regenerateEntity(db, body)
     if (request.method === 'DELETE' && action === 'delete-entity') return await deleteEntity(db, body)
@@ -227,6 +237,167 @@ async function deleteSuggestion(db, payload) {
   return json({ ok: true })
 }
 
+async function listClients(db, params) {
+  const clauses = []
+  const args = []
+  const search = sanitizeText(params.get('search'))
+  if (search) {
+    clauses.push(`(c.name LIKE ? OR c.email LIKE ? OR COALESCE(c.phone, '') LIKE ?)`)
+    const pattern = `%${search.slice(0, IDENTIFICATION_MAX_LENGTH)}%`
+    args.push(pattern, pattern, pattern)
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+  const pagination = await resolvePagination(
+    db,
+    `SELECT COUNT(*) AS total FROM Clientes c ${where}`,
+    args,
+    params,
+  )
+  const result = await db.execute({
+    sql: `SELECT c.id, c.name, c.email, c.phone, c.active, COUNT(e.id) AS entity_count
+          FROM Clientes c
+          LEFT JOIN Entidades e ON e.clienteID = c.id
+          ${where}
+          GROUP BY c.id, c.name, c.email, c.phone, c.active
+          ORDER BY c.name, c.id LIMIT ? OFFSET ?`,
+    args: [...args, pagination.pageSize, pagination.offset],
+  })
+  return pageResult(result.rows.map(mapClient), pagination)
+}
+
+async function listClientOptions(db) {
+  const result = await db.execute(
+    'SELECT id, name, email, active FROM Clientes ORDER BY name, id',
+  )
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    active: Boolean(row.active),
+  }))
+}
+
+async function saveClient(db, client) {
+  const name = requiredText(client.name, CLIENT_NAME_MAX_LENGTH, 'Nombre')
+  const email = optionalText(client.email, CLIENT_EMAIL_MAX_LENGTH, 'Correo').toLowerCase()
+  const phone = optionalText(client.phone, CLIENT_PHONE_MAX_LENGTH, 'Celular')
+
+  if (!email) throw new HttpError(400, 'El correo es obligatorio.')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Escribe un correo válido.')
+  if (phone && !/^[0-9+() .-]{7,30}$/.test(phone)) throw new HttpError(400, 'Escribe un número de celular válido.')
+
+  const active = client.active ? 1 : 0
+
+  if (!client.id) {
+    const inserted = await db.execute({
+      sql: 'INSERT INTO Clientes (name, email, phone, active) VALUES (?, ?, ?, ?)',
+      args: [name, email, phone, active],
+    })
+    return json({ ok: true, id: Number(inserted.lastInsertRowid) })
+  }
+
+  const id = validId(client.id, 'cliente')
+  const current = await db.execute({ sql: 'SELECT email FROM Clientes WHERE id = ? LIMIT 1', args: [id] })
+  if (!current.rows[0]) throw new HttpError(404, 'No se encontró el cliente.')
+
+  // Cambiar el correo es cambiar la credencial de acceso: corta las sesiones
+  // abiertas incrementando auth_version y descartando los códigos pendientes.
+  const emailChanged = String(current.rows[0].email || '').toLowerCase() !== email
+
+  await db.execute({
+    sql: `UPDATE Clientes
+          SET name = ?, email = ?, phone = ?, active = ?,
+              auth_version = auth_version + ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+    args: [name, email, phone, active, emailChanged ? 1 : 0, id],
+  })
+
+  if (emailChanged) {
+    await db.execute({ sql: 'DELETE FROM ClientAccessCodes WHERE cliente_id = ?', args: [id] })
+  }
+  if (emailChanged || !active) await purgeClientEntitiesCache(db, id)
+
+  return json({ ok: true, id })
+}
+
+async function deleteClient(db, payload) {
+  const id = validId(payload.id, 'cliente')
+  const dependencies = await db.execute({
+    sql: 'SELECT COUNT(*) AS total FROM Entidades WHERE clienteID = ?',
+    args: [id],
+  })
+  if (Number(dependencies.rows[0].total)) {
+    throw new HttpError(409, 'No puedes eliminar un cliente que tenga fichas. Desactívalo en su lugar.')
+  }
+
+  await db.batch([
+    { sql: 'DELETE FROM ClientAccessCodes WHERE cliente_id = ?', args: [id] },
+    { sql: 'DELETE FROM Clientes WHERE id = ?', args: [id] },
+  ], 'write')
+
+  return json({ ok: true })
+}
+
+/**
+ * Resuelve el cliente de una ficha. Acepta `clienteId` (lo que envía el panel)
+ * y, por compatibilidad, un `ownerEmail` suelto: si no existe un cliente con
+ * ese correo se crea, que es lo que hacía el formulario anterior.
+ */
+async function resolveClient(db, payload) {
+  if (payload.clienteId) {
+    const id = validId(payload.clienteId, 'cliente')
+    const result = await db.execute({
+      sql: 'SELECT id, name, email, phone, active FROM Clientes WHERE id = ? LIMIT 1',
+      args: [id],
+    })
+    if (!result.rows[0]) throw new HttpError(404, 'No se encontró el cliente.')
+    return mapClient(result.rows[0])
+  }
+
+  const email = optionalText(payload.ownerEmail, CLIENT_EMAIL_MAX_LENGTH, 'Correo').toLowerCase()
+  if (!email) return null
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Escribe un correo válido.')
+
+  const existing = await db.execute({
+    sql: 'SELECT id, name, email, phone, active FROM Clientes WHERE LOWER(TRIM(email)) = ? LIMIT 1',
+    args: [email],
+  })
+  if (existing.rows[0]) return mapClient(existing.rows[0])
+
+  const name = optionalText(payload.ownerName, CLIENT_NAME_MAX_LENGTH, 'Nombre del propietario')
+  const phone = optionalText(payload.ownerPhone, CLIENT_PHONE_MAX_LENGTH, 'Celular')
+  const inserted = await db.execute({
+    sql: 'INSERT INTO Clientes (name, email, phone, active) VALUES (?, ?, ?, 1)',
+    args: [name || email.slice(0, email.indexOf('@')), email, phone],
+  })
+  return {
+    id: Number(inserted.lastInsertRowid),
+    name: name || email.slice(0, email.indexOf('@')),
+    email,
+    phone,
+    active: true,
+  }
+}
+
+async function purgeClientEntitiesCache(db, clienteId) {
+  const result = await db.execute({
+    sql: 'SELECT id FROM Entidades WHERE clienteID = ?',
+    args: [clienteId],
+  })
+  await purgeEntityCaches(result.rows.map((row) => Number(row.id)))
+}
+
+function mapClient(row) {
+  return {
+    id: Number(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    phone: String(row.phone || ''),
+    active: Boolean(row.active),
+    entityCount: Number(row.entity_count || 0),
+  }
+}
+
 async function listEntities(db, params) {
   const clauses = []
   const args = []
@@ -234,19 +405,33 @@ async function listEntities(db, params) {
     clauses.push('e.categoriaID = ?')
     args.push(validId(params.get('categoryId'), 'categoría'))
   }
+  if (params.get('clienteId')) {
+    clauses.push('e.clienteID = ?')
+    args.push(validId(params.get('clienteId'), 'cliente'))
+  }
   const search = sanitizeText(params.get('search'))
   if (search) {
-    clauses.push('(e.Identificacion LIKE ? OR e.token LIKE ? OR e.short_code LIKE ? OR e.owner_email LIKE ?)')
+    clauses.push(`(e.Identificacion LIKE ? OR e.token LIKE ? OR e.short_code LIKE ?
+                  OR cl.name LIKE ? OR cl.email LIKE ?)`)
     const pattern = `%${search.slice(0, IDENTIFICATION_MAX_LENGTH)}%`
-    args.push(pattern, pattern, pattern, pattern)
+    args.push(pattern, pattern, pattern, pattern, pattern)
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-  const pagination = await resolvePagination(db, `SELECT COUNT(*) AS total FROM Entidades e ${where}`, args, params)
+  const pagination = await resolvePagination(
+    db,
+    `SELECT COUNT(*) AS total FROM Entidades e
+       LEFT JOIN Clientes cl ON cl.id = e.clienteID ${where}`,
+    args,
+    params,
+  )
   const result = await db.execute({
     sql: `SELECT e.id, e.Identificacion AS identificacion, e.token, e.short_code,
-                 e.categoriaID, e.owner_name, e.owner_email, e.owner_phone,
+                 e.categoriaID, e.clienteID,
+                 cl.name AS client_name, cl.email AS client_email, cl.phone AS client_phone,
                  c.name AS category_name, c.code AS category_code
-          FROM Entidades e INNER JOIN Categorias c ON c.id = e.categoriaID
+          FROM Entidades e
+          INNER JOIN Categorias c ON c.id = e.categoriaID
+          LEFT JOIN Clientes cl ON cl.id = e.clienteID
           ${where} ORDER BY e.id DESC LIMIT ? OFFSET ?`,
     args: [...args, pagination.pageSize, pagination.offset],
   })
@@ -256,38 +441,126 @@ async function listEntities(db, params) {
 async function createEntity(db, payload) {
   const identification = requiredText(payload.identification, IDENTIFICATION_MAX_LENGTH, 'Identificación')
   const categoryId = validId(payload.categoryId, 'categoría')
-  const owner = validateOwner(payload)
+  const cliente = await resolveClient(db, payload)
   await ensureUniqueIdentification(db, identification)
   const token = await generateUniqueToken(db)
   const shortCode = await generateUniqueShortCode(db)
   await db.execute({
     sql: `INSERT INTO Entidades
-          (Identificacion, token, short_code, categoriaID, custom_data, owner_name, owner_email, owner_phone, auth_version)
-          VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 1)`,
-    args: [identification, token, shortCode, categoryId, owner.name, owner.email, owner.phone],
+          (Identificacion, token, short_code, categoriaID, custom_data,
+           owner_name, owner_email, owner_phone, auth_version, clienteID)
+          VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 1, ?)`,
+    args: [
+      identification, token, shortCode, categoryId,
+      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
+      cliente?.id ?? null,
+    ],
   })
-  return json({ token, shortCode })
+  return json({ token, shortCode, clienteId: cliente?.id ?? null })
+}
+
+/**
+ * Crea un rango de fichas de una vez, para el caso de la finca con muchas
+ * cabezas. Valida las colisiones del lote completo antes de insertar nada.
+ */
+async function bulkCreateEntities(db, payload) {
+  const categoryId = validId(payload.categoryId, 'categoría')
+  const cliente = await resolveClient(db, payload)
+  const prefix = sanitizeText(payload.prefix)
+  if (!prefix) throw new HttpError(400, 'El prefijo es obligatorio.')
+  if (prefix.length > BULK_PREFIX_MAX_LENGTH) {
+    throw new HttpError(400, `El prefijo no puede superar ${BULK_PREFIX_MAX_LENGTH} caracteres.`)
+  }
+
+  const from = Number(payload.from)
+  const to = Number(payload.to)
+  const pad = Number(payload.pad ?? 3)
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+    throw new HttpError(400, 'El rango debe ser dos números enteros, con el final mayor o igual que el inicial.')
+  }
+  if (!Number.isInteger(pad) || pad < 1 || pad > 10) {
+    throw new HttpError(400, 'El relleno debe ser un número entre 1 y 10.')
+  }
+
+  const total = to - from + 1
+  if (total > BULK_ENTITY_LIMIT) {
+    throw new HttpError(400, `No se pueden crear más de ${BULK_ENTITY_LIMIT} fichas de una vez.`)
+  }
+
+  const identifications = []
+  for (let value = from; value <= to; value += 1) {
+    const identification = `${prefix}${String(value).padStart(pad, '0')}`
+    if (identification.length > IDENTIFICATION_MAX_LENGTH) {
+      throw new HttpError(400, `La identificación "${identification}" supera ${IDENTIFICATION_MAX_LENGTH} caracteres.`)
+    }
+    identifications.push(identification)
+  }
+
+  const placeholders = identifications.map(() => '?').join(', ')
+  const clash = await db.execute({
+    sql: `SELECT Identificacion FROM Entidades
+          WHERE LOWER(TRIM(Identificacion)) IN (${placeholders})`,
+    args: identifications.map((value) => value.toLowerCase()),
+  })
+  if (clash.rows.length) {
+    const shown = clash.rows.slice(0, 5).map((row) => String(row.Identificacion))
+    const extra = clash.rows.length > shown.length ? ` y ${clash.rows.length - shown.length} más` : ''
+    throw new HttpError(409, `Ya existen ${clash.rows.length} identificaciones en ese rango: ${shown.join(', ')}${extra}.`)
+  }
+
+  const shortCodes = await generateUniqueShortCodes(db, identifications.length)
+  const rows = identifications.map((identification, index) => ({
+    sql: `INSERT INTO Entidades
+          (Identificacion, token, short_code, categoriaID, custom_data,
+           owner_name, owner_email, owner_phone, auth_version, clienteID)
+          VALUES (?, ?, ?, ?, '[]', ?, ?, ?, 1, ?)`,
+    args: [
+      identification, crypto.randomUUID(), shortCodes[index], categoryId,
+      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
+      cliente?.id ?? null,
+    ],
+  }))
+
+  await db.batch(rows, 'write')
+
+  return json({
+    ok: true,
+    created: rows.length,
+    first: identifications[0],
+    last: identifications[identifications.length - 1],
+    clienteId: cliente?.id ?? null,
+  })
 }
 
 async function updateEntity(db, payload) {
   const id = validId(payload.id, 'entidad')
   const identification = requiredText(payload.identification, IDENTIFICATION_MAX_LENGTH, 'Identificación')
   const categoryId = validId(payload.categoryId, 'categoría')
-  const owner = validateOwner(payload)
+  const cliente = await resolveClient(db, payload)
   await ensureUniqueIdentification(db, identification, id)
-  const current = await db.execute({ sql: 'SELECT owner_email FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
+  const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
   if (!current.rows[0]) throw new HttpError(404, 'No se encontró la entidad.')
-  const emailChanged = String(current.rows[0].owner_email || '').toLowerCase() !== owner.email
+
+  const previousClientId = current.rows[0].clienteID === null ? null : Number(current.rows[0].clienteID)
+
   await db.execute({
     sql: `UPDATE Entidades
-          SET Identificacion = ?, categoriaID = ?, owner_name = ?, owner_email = ?, owner_phone = ?,
-              auth_version = auth_version + ?
+          SET Identificacion = ?, categoriaID = ?,
+              owner_name = ?, owner_email = ?, owner_phone = ?, clienteID = ?
           WHERE id = ?`,
-    args: [identification, categoryId, owner.name, owner.email, owner.phone, emailChanged ? 1 : 0, id],
+    args: [
+      identification, categoryId,
+      cliente?.name || '', cliente?.email || '', cliente?.phone || '',
+      cliente?.id ?? null, id,
+    ],
   })
-  if (emailChanged) await db.execute({ sql: 'DELETE FROM EntityAccessCodes WHERE entity_id = ?', args: [id] })
+
   await purgeEntityCache(id)
-  return json({ ok: true })
+  // Las demás fichas del cliente anterior pierden el enlace en su listado.
+  if (previousClientId && previousClientId !== (cliente?.id ?? null)) {
+    await purgeClientEntitiesCache(db, previousClientId)
+  }
+  return json({ ok: true, clienteId: cliente?.id ?? null })
 }
 
 async function regenerateEntity(db, payload) {
@@ -297,7 +570,10 @@ async function regenerateEntity(db, payload) {
   await db.batch([
     { sql: 'DELETE FROM EntityAliases WHERE entity_id = ?', args: [id] },
     { sql: 'DELETE FROM EntityAccessCodes WHERE entity_id = ?', args: [id] },
-    { sql: 'UPDATE Entidades SET token = ?, short_code = ?, auth_version = auth_version + 1 WHERE id = ?', args: [token, shortCode, id] },
+    // Las sesiones ya no se revocan por ficha: viven en el cliente. Al cambiar
+    // token y código corto la ruta anterior deja de resolver, que es lo que
+    // corta el acceso a quien tenía el enlace viejo.
+    { sql: 'UPDATE Entidades SET token = ?, short_code = ? WHERE id = ?', args: [token, shortCode, id] },
   ], 'write')
   await purgeEntityCache(id)
   return json({ token, shortCode })
@@ -314,22 +590,15 @@ async function deleteEntity(db, payload) {
   return json({ ok: true })
 }
 
-function validateOwner(payload) {
-  const name = optionalText(payload.ownerName, 100, 'Nombre del propietario')
-  const email = optionalText(payload.ownerEmail, 254, 'Correo').toLowerCase()
-  const phone = optionalText(payload.ownerPhone, 30, 'Celular')
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Escribe un correo válido.')
-  if (phone && !/^[0-9+() .-]{7,30}$/.test(phone)) throw new HttpError(400, 'Escribe un número de celular válido.')
-  return { name, email, phone }
-}
-
 function mapEntity(row) {
   return {
     id: Number(row.id), identification: String(row.identificacion), token: String(row.token),
     shortCode: String(row.short_code || ''), categoryId: Number(row.categoriaID),
     categoryName: String(row.category_name), categoryCode: String(row.category_code),
-    ownerName: String(row.owner_name || ''), ownerEmail: String(row.owner_email || ''),
-    ownerPhone: String(row.owner_phone || ''),
+    clienteId: row.clienteID === null || row.clienteID === undefined ? null : Number(row.clienteID),
+    clientName: String(row.client_name || ''),
+    clientEmail: String(row.client_email || ''),
+    clientPhone: String(row.client_phone || ''),
   }
 }
 
@@ -420,6 +689,9 @@ function asDatabaseError(error) {
   if (message.includes('Categorias.code')) {
     return new HttpError(409, 'Ya existe una categoría con ese código.')
   }
+  if (message.includes('idx_clientes_email_normalized') || message.includes('Clientes.email')) {
+    return new HttpError(409, 'Ya existe un cliente con ese correo.')
+  }
   if (message.includes('Entidades.token') || message.includes('Entidades.short_code')) {
     return new HttpError(409, 'El token o código corto ya está en uso.')
   }
@@ -434,6 +706,7 @@ function asDatabaseError(error) {
     'Sugerencia inválida o sin normalizar.',
     'Entidad inválida o sin normalizar.',
     'Alias inválido o sin normalizar.',
+    'Cliente inválido o sin normalizar.',
   ]
   const validationMessage = validationMessages.find((candidate) => message.includes(candidate))
   return validationMessage ? new HttpError(400, validationMessage) : error

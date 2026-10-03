@@ -18,6 +18,8 @@ const managedTriggerNames = [
   'validate_entities_update',
   'validate_aliases_insert',
   'validate_aliases_update',
+  'validate_clientes_insert',
+  'validate_clientes_update',
   'validate_entity_route_insert',
   'validate_entity_route_update',
   'validate_alias_route_insert',
@@ -89,6 +91,15 @@ async function assertNoNormalizedDuplicates(db) {
      LIMIT 1`,
     'sugerencias de una misma categoría',
   )
+  await assertNoDuplicates(
+    db,
+    `SELECT LOWER(${cleanText('email')}) AS normalized, GROUP_CONCAT(id) AS ids
+     FROM Clientes
+     GROUP BY LOWER(${cleanText('email')})
+     HAVING COUNT(*) > 1
+     LIMIT 1`,
+    'correos de clientes',
+  )
 
   const routeCollision = await db.execute(`
     SELECT e.id AS entity_id, a.id AS alias_id
@@ -145,6 +156,10 @@ async function normalizeExistingData(db) {
          owner_email = CASE WHEN owner_email IS NULL THEN NULL ELSE LOWER(${cleanText('owner_email')}) END,
          owner_phone = CASE WHEN owner_phone IS NULL THEN NULL ELSE ${cleanText('owner_phone')} END`,
     `UPDATE EntityAliases SET code = ${cleanText('code')}`,
+    `UPDATE Clientes
+     SET name = ${cleanText('name')},
+         email = LOWER(${cleanText('email')}),
+         phone = CASE WHEN phone IS NULL THEN NULL ELSE ${cleanText('phone')} END`,
   ], 'write')
 }
 
@@ -179,6 +194,23 @@ async function assertExistingDataIsValid(db) {
             WHERE code = '' OR LENGTH(code) > 40 OR code GLOB '*[^A-Za-z0-9_-]*' LIMIT 1`,
       message: 'Hay un alias vacío, demasiado largo o inválido.',
     },
+    {
+      sql: `SELECT id FROM Clientes
+            WHERE name = '' OR LENGTH(name) > 100
+               OR email = '' OR LENGTH(email) > 254
+               OR LENGTH(COALESCE(phone, '')) > 30
+               OR auth_version < 1 LIMIT 1`,
+      message: 'Hay un cliente con nombre, correo o celular inválido.',
+    },
+    {
+      // Las foreign keys de SQLite vienen desactivadas, así que la integridad
+      // de clienteID se comprueba aquí y con los triggers.
+      sql: `SELECT e.id FROM Entidades e
+            WHERE e.clienteID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM Clientes c WHERE c.id = e.clienteID)
+            LIMIT 1`,
+      message: 'Hay una entidad apuntando a un cliente que no existe.',
+    },
   ]
 
   for (const check of checks) {
@@ -196,6 +228,8 @@ async function createUniqueIndexes(db) {
      ON Entidades (short_code) WHERE short_code IS NOT NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_name_normalized
      ON CategoriaSugerencias (categoriaID, LOWER(TRIM(name)))`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_normalized
+     ON Clientes (LOWER(TRIM(email)))`,
   ], 'write')
 }
 
@@ -232,6 +266,14 @@ async function createValidationTriggers(db) {
   const aliasValidation = `
     NEW.code IS NULL OR NEW.code = '' OR NEW.code <> TRIM(NEW.code)
     OR LENGTH(NEW.code) > 40 OR NEW.code GLOB '*[^A-Za-z0-9_-]*'`
+  const clientValidation = `
+    NEW.name IS NULL OR NEW.name = '' OR NEW.name <> TRIM(NEW.name) OR LENGTH(NEW.name) > 100
+    OR ${invisibleCheck('NEW.name')}
+    OR NEW.email IS NULL OR NEW.email = '' OR NEW.email <> LOWER(TRIM(NEW.email))
+    OR LENGTH(NEW.email) > 254
+    OR LENGTH(COALESCE(NEW.phone, '')) > 30
+    OR (NEW.phone IS NOT NULL AND NEW.phone <> TRIM(NEW.phone))
+    OR NEW.auth_version < 1`
 
   await db.batch([
     ...managedTriggerNames.map((name) => `DROP TRIGGER IF EXISTS ${name}`),
@@ -243,6 +285,8 @@ async function createValidationTriggers(db) {
     validationTrigger('validate_entities_update', 'Entidades', 'UPDATE', entityValidation, 'Entidad inválida o sin normalizar.'),
     validationTrigger('validate_aliases_insert', 'EntityAliases', 'INSERT', aliasValidation, 'Alias inválido o sin normalizar.'),
     validationTrigger('validate_aliases_update', 'EntityAliases', 'UPDATE', aliasValidation, 'Alias inválido o sin normalizar.'),
+    validationTrigger('validate_clientes_insert', 'Clientes', 'INSERT', clientValidation, 'Cliente inválido o sin normalizar.'),
+    validationTrigger('validate_clientes_update', 'Clientes', 'UPDATE', clientValidation, 'Cliente inválido o sin normalizar.'),
     collisionTrigger('validate_entity_route_insert', 'INSERT'),
     collisionTrigger('validate_entity_route_update', 'UPDATE'),
     aliasCollisionTrigger('validate_alias_route_insert', 'INSERT'),

@@ -11,8 +11,10 @@ import { HttpError, getCookie } from './http.mjs'
 
 export const ADMIN_COOKIE = 'gd_admin_session'
 export const ENTITY_COOKIE = 'gd_entity_session'
+export const CLIENT_COOKIE = 'gd_client_session'
 export const ADMIN_SESSION_SECONDS = 8 * 60 * 60
 export const ENTITY_SESSION_SECONDS = 8 * 60 * 60
+export const CLIENT_SESSION_SECONDS = 8 * 60 * 60
 export const OTP_SECONDS = 10 * 60
 
 function authSecret() {
@@ -58,14 +60,66 @@ export function getEntitySession(request) {
   return verifySession(getCookie(request, ENTITY_COOKIE), 'entity')
 }
 
-export function requireEntitySession(request, entity) {
-  const session = getEntitySession(request)
+export function getClientSession(request) {
+  return verifySession(getCookie(request, CLIENT_COOKIE), 'client')
+}
+
+/**
+ * Sesión válida para escribir en una ficha concreta, o null.
+ *
+ * Sirven dos: la de la propia ficha (la que emite el OTP desde la página
+ * pública) y la del cliente dueño (la del portal). Sobre esa ficha dan los
+ * mismos permisos; la diferencia es el alcance, porque la de entidad no vale
+ * para las demás fichas del cliente.
+ */
+function entityAccessSession(request, entity, cliente) {
+  const version = Number(cliente?.authVersion)
+  if (!cliente || !cliente.active || !Number.isFinite(version)) return null
+
+  const clientSession = getClientSession(request)
+  if (
+    clientSession &&
+    Number(clientSession.clienteId) === Number(cliente.id) &&
+    Number(clientSession.ver) === version
+  ) {
+    return clientSession
+  }
+
+  const entitySession = getEntitySession(request)
+  if (
+    entitySession &&
+    Number(entitySession.entityId) === Number(entity.id) &&
+    Number(entitySession.clienteId) === Number(cliente.id) &&
+    Number(entitySession.ver) === version
+  ) {
+    return entitySession
+  }
+
+  return null
+}
+
+export function hasEntityAccess(request, entity, cliente) {
+  return Boolean(entityAccessSession(request, entity, cliente))
+}
+
+export function requireEntityAccess(request, entity, cliente) {
+  const session = entityAccessSession(request, entity, cliente)
+  if (!session) {
+    throw new HttpError(401, 'Valida el código enviado al correo para continuar.')
+  }
+  return session
+}
+
+/** Sesión del portal, válida para todas las fichas del cliente. */
+export function requireClientSession(request, cliente) {
+  const session = getClientSession(request)
   if (
     !session ||
-    Number(session.entityId) !== Number(entity.id) ||
-    Number(session.authVersion) !== Number(entity.authVersion)
+    !cliente ||
+    Number(session.clienteId) !== Number(cliente.id) ||
+    Number(session.ver) !== Number(cliente.authVersion)
   ) {
-    throw new HttpError(401, 'Valida el código enviado al correo para continuar.')
+    throw new HttpError(401, 'Valida el código enviado a tu correo para continuar.')
   }
   return session
 }

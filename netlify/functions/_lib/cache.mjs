@@ -25,6 +25,12 @@ export async function purgeEntityCache(entityId) {
   await purgeTags([entityCacheTag(entityId)])
 }
 
+/** Purga varias fichas de una vez: al cambiar un cliente cambian todas las suyas. */
+export async function purgeEntityCaches(entityIds) {
+  const ids = [...new Set(entityIds.map((id) => positiveId(id)))]
+  if (ids.length) await purgeTags(ids.map(entityCacheTag))
+}
+
 export async function purgeCategoryCache(categoryId) {
   await purgeTags([categoryCacheTag(categoryId)])
 }

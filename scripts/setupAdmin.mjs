@@ -118,6 +118,94 @@ await db.execute(
   'CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity ON EntityAliases (entity_id)',
 )
 
+await db.execute(`CREATE TABLE IF NOT EXISTS Clientes (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  active NUMERIC NOT NULL DEFAULT 1,
+  auth_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`)
+
+await db.execute(`CREATE TABLE IF NOT EXISTS ClientAccessCodes (
+  id INTEGER PRIMARY KEY,
+  cliente_id INTEGER NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  consumed NUMERIC NOT NULL DEFAULT 0,
+  request_ip TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  CONSTRAINT constraint_ClientAccessCodes_Cliente
+    FOREIGN KEY (cliente_id) REFERENCES Clientes (id) ON DELETE CASCADE
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_lookup ON ClientAccessCodes (cliente_id, created_at)',
+)
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
+)
+
+// La limpieza por antigüedad no puede usar los índices que empiezan por id.
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
+)
+
+if (!entityColumns.rows.some((column) => column.name === 'clienteID')) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN clienteID INTEGER REFERENCES Clientes (id)')
+}
+
+await db.execute('CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)')
+
+// Alta de clientes a partir de los dueños ya existentes. Agrupa por correo
+// normalizado y, para cada campo, toma el valor NO VACÍO más reciente de
+// cualquier ficha del grupo: la última ficha creada puede tener el nombre
+// vacío y no debe pisar el que ya había.
+await db.execute(`INSERT INTO Clientes (name, email, phone)
+SELECT
+  COALESCE(
+    (SELECT NULLIF(TRIM(e2.owner_name), '')
+       FROM Entidades e2
+      WHERE LOWER(TRIM(e2.owner_email)) = LOWER(TRIM(e.owner_email))
+        AND NULLIF(TRIM(e2.owner_name), '') IS NOT NULL
+      ORDER BY e2.id DESC LIMIT 1),
+    CASE WHEN instr(LOWER(TRIM(e.owner_email)), '@') > 1
+         THEN substr(LOWER(TRIM(e.owner_email)), 1,
+                     instr(LOWER(TRIM(e.owner_email)), '@') - 1)
+         ELSE LOWER(TRIM(e.owner_email)) END
+  ),
+  LOWER(TRIM(e.owner_email)),
+  (SELECT NULLIF(TRIM(e3.owner_phone), '')
+     FROM Entidades e3
+    WHERE LOWER(TRIM(e3.owner_email)) = LOWER(TRIM(e.owner_email))
+      AND NULLIF(TRIM(e3.owner_phone), '') IS NOT NULL
+    ORDER BY e3.id DESC LIMIT 1)
+FROM Entidades e
+WHERE e.owner_email IS NOT NULL
+  AND TRIM(e.owner_email) <> ''
+  AND e.id = (
+    SELECT MIN(e4.id) FROM Entidades e4
+    WHERE LOWER(TRIM(e4.owner_email)) = LOWER(TRIM(e.owner_email))
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM Clientes c
+    WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(e.owner_email))
+  )`)
+
+// Vincula cada ficha con su cliente. Las fichas sin correo quedan en NULL y
+// siguen en modo solo lectura.
+await db.execute(`UPDATE Entidades
+SET clienteID = (
+  SELECT c.id FROM Clientes c
+  WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(Entidades.owner_email))
+)
+WHERE clienteID IS NULL
+  AND owner_email IS NOT NULL
+  AND TRIM(owner_email) <> ''`)
+
 async function generateUniqueShortCode() {
   let shortCode
   let exists = true

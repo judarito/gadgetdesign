@@ -30,6 +30,46 @@ export async function generateUniqueShortCode(db) {
   throw new Error('No fue posible generar un código corto único.')
 }
 
+/**
+ * Genera varios códigos cortos únicos de una vez, para la creación masiva.
+ * Comprueba las colisiones del lote completo en una sola consulta en lugar de
+ * una por ficha.
+ */
+export async function generateUniqueShortCodes(db, count) {
+  const accepted = new Set()
+  let rounds = 0
+
+  while (accepted.size < count) {
+    if (rounds++ > MAX_GENERATION_ATTEMPTS * 4) {
+      throw new Error('No fue posible generar los códigos cortos únicos.')
+    }
+
+    const batch = []
+    const seen = new Set(accepted)
+    while (batch.length < count - accepted.size) {
+      const code = generateShortCode()
+      if (seen.has(code)) continue
+      seen.add(code)
+      batch.push(code)
+    }
+
+    const placeholders = batch.map(() => '?').join(', ')
+    const taken = await db.execute({
+      sql: `SELECT short_code AS code FROM Entidades WHERE short_code IN (${placeholders})
+            UNION ALL
+            SELECT code FROM EntityAliases WHERE code IN (${placeholders})`,
+      args: [...batch, ...batch],
+    })
+    const takenCodes = new Set(taken.rows.map((row) => String(row.code)))
+
+    for (const code of batch) {
+      if (!takenCodes.has(code)) accepted.add(code)
+    }
+  }
+
+  return [...accepted]
+}
+
 export function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value),

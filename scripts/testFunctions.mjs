@@ -2,8 +2,14 @@ import { spawn } from 'node:child_process'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
 import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
+import { CLIENT_COOKIE, CLIENT_SESSION_SECONDS, signSession } from '../netlify/functions/_lib/security.mjs'
 
 const env = loadEnv('', process.cwd(), '')
+
+// La sesión del portal la emite client.mjs en la fase 2. Mientras tanto, aquí se
+// firma con el mismo secreto para poder probar la autorización por pertenencia.
+process.env.APP_AUTH_SECRET ??= env.APP_AUTH_SECRET
+
 const server = spawn('npm', ['run', 'dev'], {
   cwd: process.cwd(),
   env: { ...process.env, XDG_CONFIG_HOME: '/tmp/netlify-config' },
@@ -149,11 +155,118 @@ try {
   const adminCookie = getCookieHeader(login.response)
   assert(adminCookie, 'El login administrativo debe crear una cookie segura.')
   const entities = await request('admin', 'entities', { cookie: adminCookie })
-  assert(entities.items[0].ownerEmail === 'cliente@example.com', 'El administrador debe recibir los datos de contacto.')
+  assert(entities.items[0].clientEmail === 'cliente@example.com', 'El administrador debe recibir los datos de contacto.')
   await expectStatus(() => request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
     body: { identification: 'local-001', categoryId: 1, ownerName: '', ownerEmail: '', ownerPhone: '' },
   }), 409, 'No debe permitir identificaciones duplicadas.')
+
+  // --- Modelo de clientes -------------------------------------------------
+  const clients = await request('admin', 'clients', { cookie: adminCookie })
+  assert(clients.items.length === 1 && clients.items[0].email === 'cliente@example.com',
+    'El cliente creado por la migración desde owner_email debe aparecer en el listado.')
+  assert(clients.items[0].entityCount === 1, 'El cliente debe mostrar cuántas fichas tiene.')
+
+  await expectStatus(() => request('admin', 'delete-client', {
+    method: 'DELETE', cookie: adminCookie, body: { id: 1 },
+  }), 409, 'No debe eliminar un cliente que tenga fichas asignadas.')
+
+  const newClient = await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { name: 'Finca El Paraíso', email: 'finca@example.com', phone: '+57 311 222 3344', active: true },
+  })
+  assert(Number.isInteger(newClient.id), 'Crear un cliente debe devolver su id.')
+
+  await expectStatus(() => request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { name: 'Duplicado', email: 'FINCA@example.com', active: true },
+  }), 409, 'No debe permitir dos clientes con el mismo correo.')
+
+  await request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie, body: { name: 'Motos', code: 'MOTO', active: true },
+  })
+  const categoryOptions = await request('admin', 'category-options', { cookie: adminCookie })
+  const motoCategoryId = categoryOptions.find((category) => category.code === 'MOTO').id
+
+  const bulk = await request('admin', 'bulk-create-entities', {
+    method: 'POST', cookie: adminCookie,
+    body: { categoryId: motoCategoryId, clienteId: newClient.id, prefix: 'MOTO-', from: 1, to: 3, pad: 3 },
+  })
+  assert(bulk.created === 3 && bulk.first === 'MOTO-001' && bulk.last === 'MOTO-003',
+    'La creación masiva debe generar todo el rango.')
+
+  await expectStatus(() => request('admin', 'bulk-create-entities', {
+    method: 'POST', cookie: adminCookie,
+    body: { categoryId: motoCategoryId, clienteId: newClient.id, prefix: 'MOTO-', from: 3, to: 5, pad: 3 },
+  }), 409, 'La creación masiva debe abortar si el rango pisa identificaciones existentes.')
+
+  const clientEntities = await request('admin', 'entities', {
+    cookie: adminCookie, query: { clienteId: newClient.id, pageSize: 50 },
+  })
+  assert(clientEntities.total === 3, 'El filtro por cliente debe devolver solo sus fichas.')
+
+  const single = await request('admin', 'create-entity', {
+    method: 'POST', cookie: adminCookie,
+    body: { identification: 'MOTO-010', categoryId: motoCategoryId, clienteId: newClient.id },
+  })
+  assert(typeof single.shortCode === 'string' && single.clienteId === newClient.id,
+    'Crear una ficha desde el panel debe vincularla al cliente elegido.')
+
+  const orphan = await request('admin', 'create-entity', {
+    method: 'POST', cookie: adminCookie,
+    body: { identification: 'SIN-DUENO-01', categoryId: motoCategoryId, clienteId: null },
+  })
+  const orphanContext = await request('entity', 'context', { query: { token: orphan.shortCode } })
+  assert(!orphanContext.auth.canRequestCode && !orphanContext.auth.authorized,
+    'Una ficha sin cliente debe quedar en solo lectura.')
+
+  const moto1 = clientEntities.items.find((item) => item.identification === 'MOTO-001')
+  const moto2 = clientEntities.items.find((item) => item.identification === 'MOTO-002')
+
+  // La sesión del portal cubre todas las fichas del cliente.
+  const clientCookie = clientSessionCookie(newClient.id, 1)
+  const byClient1 = await request('entity', 'create-data', {
+    method: 'POST', cookie: clientCookie,
+    body: { token: moto1.shortCode, data: { key: 'Cilindraje', value: '150', dataType: 'number' } },
+  })
+  assert(byClient1.entity.customData.some((item) => item.key === 'Cilindraje'),
+    'La sesión del cliente debe poder editar una de sus fichas.')
+  const byClient2 = await request('entity', 'create-data', {
+    method: 'POST', cookie: clientCookie,
+    body: { token: moto2.shortCode, data: { key: 'Placa', value: 'ABC12D', dataType: 'text' } },
+  })
+  assert(byClient2.entity.customData.some((item) => item.key === 'Placa'),
+    'La sesión del cliente debe alcanzar también sus otras fichas.')
+
+  // Mínimo privilegio: ni la sesión de otra ficha ni la de otro cliente sirven.
+  await expectStatus(() => request('entity', 'create-data', {
+    method: 'POST', cookie: clientCookie,
+    body: { token: 'Local001', data: { key: 'Intruso', value: 'No', dataType: 'text' } },
+  }), 401, 'La sesión de un cliente no debe editar fichas de otro cliente.')
+
+  await expectStatus(() => request('entity', 'create-data', {
+    method: 'POST', cookie: entityCookie,
+    body: { token: moto1.shortCode, data: { key: 'Intruso', value: 'No', dataType: 'text' } },
+  }), 401, 'La sesión de una ficha no debe servir para otra ficha del mismo cliente.')
+
+  // Cambiar el correo es cambiar la credencial: corta las sesiones abiertas.
+  await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: newClient.id, name: 'Finca El Paraíso', email: 'nueva@example.com', phone: '', active: true },
+  })
+  await expectStatus(() => request('entity', 'create-data', {
+    method: 'POST', cookie: clientCookie,
+    body: { token: moto1.shortCode, data: { key: 'Tras cambio', value: 'No', dataType: 'text' } },
+  }), 401, 'Cambiar el correo del cliente debe cortar sus sesiones.')
+
+  // Desactivar al cliente deja sus fichas en solo lectura, sin borrar nada.
+  await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: newClient.id, name: 'Finca El Paraíso', email: 'nueva@example.com', active: false },
+  })
+  const deactivated = await request('entity', 'context', { query: { token: moto1.shortCode } })
+  assert(!deactivated.auth.canRequestCode && !deactivated.auth.authorized,
+    'Un cliente desactivado debe dejar sus fichas en solo lectura.')
 
   await expectStatus(() => request('entity', 'delete-entity', {
     method: 'DELETE', cookie: entityCookie,
@@ -178,6 +291,11 @@ try {
   console.log('✓ Restricciones de integridad aplicadas directamente en la base')
   console.log('✓ Confirmaciones y eliminación completa transaccional')
   console.log('✓ Sesión administrativa serverless')
+  console.log('✓ Cliente migrado desde owner_email y vinculación de fichas')
+  console.log('✓ CRUD de clientes con correo único y borrado bloqueado')
+  console.log('✓ Creación masiva por rango con detección de colisiones')
+  console.log('✓ Autorización por pertenencia (sesión de cliente y de ficha)')
+  console.log('✓ Revocación al cambiar el correo y solo lectura al desactivar')
 } finally {
   try {
     process.kill(-server.pid, 'SIGTERM')
@@ -229,6 +347,12 @@ async function waitForOtp() {
 
 function getCookieHeader(response) {
   return response.headers.get('set-cookie')?.split(';')[0] || ''
+}
+
+/** Cookie de portal firmada con el mismo secreto que usan las Functions. */
+function clientSessionCookie(clienteId, ver) {
+  const token = signSession({ type: 'client', clienteId, ver }, CLIENT_SESSION_SECONDS)
+  return `${CLIENT_COOKIE}=${encodeURIComponent(token)}`
 }
 
 function assert(condition, message) {

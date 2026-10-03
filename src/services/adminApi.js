@@ -52,12 +52,32 @@ export function deleteSuggestion(id, categoryId) {
   return apiRequest('admin', { action: 'delete-suggestion', method: 'DELETE', body: { id, categoryId } })
 }
 
-export function listEntities({ categoryId = null, search = '', page = 1, pageSize = 10 } = {}) {
-  return apiRequest('admin', { action: 'entities', query: { categoryId, search, page, pageSize } })
+export function listClientOptions() {
+  return apiRequest('admin', { action: 'client-options' })
+}
+
+export function listClients({ search = '', page = 1, pageSize = 10 } = {}) {
+  return apiRequest('admin', { action: 'clients', query: { search, page, pageSize } })
+}
+
+export function saveClient(client) {
+  return apiRequest('admin', { action: 'save-client', method: 'POST', body: client })
+}
+
+export function deleteClient(id) {
+  return apiRequest('admin', { action: 'delete-client', method: 'DELETE', body: { id } })
+}
+
+export function listEntities({ categoryId = null, clienteId = null, search = '', page = 1, pageSize = 10 } = {}) {
+  return apiRequest('admin', { action: 'entities', query: { categoryId, clienteId, search, page, pageSize } })
 }
 
 export function createEntity(entity) {
   return apiRequest('admin', { action: 'create-entity', method: 'POST', body: entity })
+}
+
+export function bulkCreateEntities(range) {
+  return apiRequest('admin', { action: 'bulk-create-entities', method: 'POST', body: range })
 }
 
 export function updateEntity(entity) {
