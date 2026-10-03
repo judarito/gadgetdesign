@@ -49,7 +49,7 @@ export default async function handler(request) {
     }
     if (request.method === 'POST' && action === 'login') return await login(request, await readJson(request))
     if (request.method === 'POST' && action === 'logout') {
-      return json({ ok: true }, 200, { 'set-cookie': clearCookie(ADMIN_COOKIE) })
+      return json({ ok: true }, 200, { 'set-cookie': clearCookie(ADMIN_COOKIE, request) })
     }
 
     requireAdmin(request)
@@ -116,7 +116,7 @@ async function login(request, payload) {
   return json(
     { authenticated: true },
     200,
-    { 'set-cookie': sessionCookie(ADMIN_COOKIE, token, ADMIN_SESSION_SECONDS) },
+    { 'set-cookie': sessionCookie(ADMIN_COOKIE, token, ADMIN_SESSION_SECONDS, request) },
   )
 }
 

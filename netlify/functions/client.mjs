@@ -44,7 +44,7 @@ export default async function handler(request) {
       return await verifyCode(request, await readJson(request))
     }
     if (request.method === 'POST' && action === 'logout') {
-      return json({ ok: true }, 200, { 'set-cookie': clearCookie(CLIENT_COOKIE) })
+      return json({ ok: true }, 200, { 'set-cookie': clearCookie(CLIENT_COOKIE, request) })
     }
     if (request.method === 'GET' && action === 'context') {
       return await context(request, url.searchParams)
@@ -237,7 +237,7 @@ async function verifyCode(request, payload) {
   const response = await buildContext(db, cliente, new URLSearchParams())
 
   return json(response, 200, {
-    'set-cookie': sessionCookie(CLIENT_COOKIE, token, CLIENT_SESSION_SECONDS),
+    'set-cookie': sessionCookie(CLIENT_COOKIE, token, CLIENT_SESSION_SECONDS, request),
     'netlify-cdn-cache-control': 'no-store',
   })
 }

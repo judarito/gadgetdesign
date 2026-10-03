@@ -64,7 +64,7 @@ export default async function handler(request) {
     }
     if (request.method === 'POST' && action === 'logout') {
       return json({ ok: true }, 200, {
-        'set-cookie': [clearCookie(ENTITY_COOKIE), clearCookie(CLIENT_COOKIE)],
+        'set-cookie': [clearCookie(ENTITY_COOKIE, request), clearCookie(CLIENT_COOKIE, request)],
       })
     }
     if (request.method === 'POST' && action === 'create-data') {
@@ -236,7 +236,7 @@ async function verifyCode(request, payload) {
   return json(
     await getContext(request, payload, true),
     200,
-    { 'set-cookie': sessionCookie(ENTITY_COOKIE, token, ENTITY_SESSION_SECONDS) },
+    { 'set-cookie': sessionCookie(ENTITY_COOKIE, token, ENTITY_SESSION_SECONDS, request) },
   )
 }
 
@@ -299,7 +299,7 @@ async function deleteCurrentEntity(request, payload) {
   return json(
     { ok: true },
     200,
-    { 'set-cookie': [clearCookie(ENTITY_COOKIE), clearCookie(CLIENT_COOKIE)] },
+    { 'set-cookie': [clearCookie(ENTITY_COOKIE, request), clearCookie(CLIENT_COOKIE, request)] },
   )
 }
 

@@ -72,16 +72,28 @@ function positiveId(value) {
 }
 
 async function purgeTags(tags) {
-  if (!isDeployedNetlifyContext()) return
+  if (!hasCdnCache()) return
 
   try {
     await purgeCache({ tags })
   } catch (error) {
-    // La escritura ya fue confirmada en Turso. El TTL limita una purga fallida a 60 segundos.
+    // La escritura ya fue confirmada en Turso. Mientras la purga falle, el TTL
+    // es lo único que impide servir la versión vieja.
     console.error(`No fue posible invalidar las etiquetas de caché: ${tags.join(', ')}`, error)
   }
 }
 
-function isDeployedNetlifyContext() {
-  return ['production', 'deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT)
+/**
+ * ¿Hay un CDN que invalidar?
+ *
+ * Antes esto miraba `process.env.CONTEXT`, que en este runtime de Functions no
+ * existe: la comprobación era siempre falsa, así que la purga no se ejecutaba
+ * nunca —ni en producción— y cada escritura dejaba la lectura pública con datos
+ * viejos hasta que expiraba el TTL de 60 segundos.
+ *
+ * `NETLIFY_LOCAL` sí lo pone el CLI en local, y el token está en el runtime
+ * desplegado.
+ */
+function hasCdnCache() {
+  return !process.env.NETLIFY_LOCAL && canPurgeCache()
 }

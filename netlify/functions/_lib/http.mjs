@@ -60,18 +60,25 @@ export function getClientIp(request) {
   ).split(',')[0].trim().slice(0, 64)
 }
 
-export function sessionCookie(name, value, maxAge) {
-  const secure = secureCookieSuffix()
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`
+export function sessionCookie(name, value, maxAge, request) {
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secureCookieSuffix(request)}`
 }
 
-export function clearCookie(name) {
-  const secure = secureCookieSuffix()
-  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`
+export function clearCookie(name, request) {
+  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookieSuffix(request)}`
 }
 
-function secureCookieSuffix() {
-  return ['production', 'deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT)
-    ? '; Secure'
-    : ''
+/**
+ * `Secure` se decide por el protocolo real de la petición.
+ *
+ * Antes se miraba `process.env.CONTEXT`, que en este runtime de Functions no
+ * existe: la comprobación era siempre falsa y las cookies de producción nunca
+ * llevaban `Secure`. El protocolo de la petición, en cambio, siempre está.
+ */
+function secureCookieSuffix(request) {
+  try {
+    return new URL(request.url).protocol === 'https:' ? '; Secure' : ''
+  } catch {
+    return ''
+  }
 }

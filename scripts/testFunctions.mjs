@@ -3,6 +3,7 @@ import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
 import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 import { publicEntityCacheHeaders } from '../netlify/functions/_lib/cache.mjs'
+import { clearCookie, sessionCookie } from '../netlify/functions/_lib/http.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 
@@ -10,6 +11,7 @@ const env = loadEnv('', process.cwd(), '')
 // pruebas corre con un token ficticio para poder comprobar el camino cacheado;
 // el camino sin token se comprueba más abajo, llamando al módulo directamente.
 process.env.NETLIFY_PURGE_API_TOKEN ??= 'token-de-prueba'
+process.env.NETLIFY_LOCAL ??= 'true'
 
 const server = spawn('npm', ['run', 'dev'], {
   cwd: process.cwd(),
@@ -49,6 +51,18 @@ try {
     'La lectura pública no debe servir contenido vencido mientras revalida.')
   assert(publicResult.response.headers.get('netlify-cache-tag') === 'entity-1,category-1',
     'La lectura pública debe etiquetarse por entidad y categoría.')
+
+  // `Secure` se decide por el protocolo real: antes dependía de
+  // `process.env.CONTEXT`, que no existe en este runtime, así que las cookies
+  // de producción nunca lo llevaban.
+  const httpsFake = { url: 'https://ejemplo.test/functions/entity' }
+  const httpFake = { url: 'http://localhost:5173/functions/entity' }
+  assert(sessionCookie('x', 'v', 60, httpsFake).includes('; Secure'),
+    'Sobre HTTPS la cookie de sesión debe llevar Secure.')
+  assert(!sessionCookie('x', 'v', 60, httpFake).includes('Secure'),
+    'En local, sobre HTTP, la cookie no debe llevar Secure.')
+  assert(clearCookie('x', httpsFake).includes('; Secure'),
+    'La cookie de borrado también debe llevar Secure sobre HTTPS.')
 
   // Sin token de purga la caché no se puede invalidar, así que no debe usarse:
   // si no, cada edición tardaría hasta 60 s en verse.
@@ -498,6 +512,7 @@ try {
   console.log('✓ Lectura pública enmascarada')
   console.log('✓ Caché público durable y sesiones con no-store')
   console.log('✓ Sin token de purga la lectura pública no se cachea')
+  console.log('✓ La cookie lleva Secure según el protocolo real')
   console.log('✓ OTP local y cookie HttpOnly')
   console.log('✓ Revelado autorizado')
   console.log('✓ Cifrado AES-GCM en almacenamiento')
