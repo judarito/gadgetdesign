@@ -19,6 +19,26 @@ if (!url || !authToken) {
   throw new Error('Faltan TURSO_URL o TURSO_TOKEN en .env.')
 }
 
+const host = String(url).split('//')[1]?.split('.')[0] || String(url)
+console.log(`Base de datos destino: ${host}`)
+
+// Este script borra columnas de forma irreversible. Si el destino no es
+// claramente de pruebas, hay que decirlo a propósito: así un despiste al
+// exportar las variables —que es la única protección que había hasta ahora— no
+// se lleva por delante las columnas que el código en producción todavía lee.
+const esDestinoDePruebas = String(url).startsWith('file:') || host.includes('-dev')
+
+if (!esDestinoDePruebas && process.env.CONFIRM_DESTRUCTIVE !== 'si') {
+  console.error('')
+  console.error(`  Esta base NO parece de pruebas: ${host}`)
+  console.error('  Este comando elimina owner_name, owner_email y owner_phone.')
+  console.error('  Si es lo que quieres, repítelo así:')
+  console.error('')
+  console.error('    CONFIRM_DESTRUCTIVE=si npm run setup:drop-legacy')
+  console.error('')
+  process.exit(1)
+}
+
 const LEGACY_COLUMNS = ['owner_name', 'owner_email', 'owner_phone']
 
 const db = createClient({ url, authToken })

@@ -11,6 +11,12 @@ if (!url || !authToken) {
   throw new Error('Faltan TURSO_URL o TURSO_TOKEN en .env.')
 }
 
+// Este script es aditivo e idempotente, así que no hace falta confirmar nada,
+// pero saber contra qué base va evita sustos: es la única forma de distinguir de
+// un vistazo si estás apuntando a pruebas o a producción.
+const host = String(url).split('//')[1]?.split('.')[0] || String(url)
+console.log(`Base de datos destino: ${host}`)
+
 const db = createClient({ url, authToken })
 
 await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (

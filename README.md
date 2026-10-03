@@ -128,8 +128,21 @@ El orden importa, y el script se protege solo: se niega a borrar si encuentra
 una ficha con correo heredado y sin cliente vinculado, y recrea antes los
 triggers porque SQLite bloquea `DROP COLUMN` si algún trigger nombra la columna.
 
+Los dos comandos imprimen al empezar la base de datos contra la que van. Además,
+`setup:drop-legacy` se niega a ejecutarse si el destino no parece de pruebas —una
+URL `file:` o un host que contenga `-dev`— salvo que lo confirmes a propósito:
+
+```sh
+CONFIRM_DESTRUCTIVE=si npm run setup:drop-legacy
+```
+
+La diferencia es entre acordarte de exportar `.env.dev.local` y que el script lo
+compruebe por ti. Un despiste ahí borraría las columnas que el código todavía en
+producción lee.
+
 En un despliegue, la secuencia segura es: `setup:admin` antes de fusionar el PR,
-y `setup:drop-legacy` después de que el código nuevo esté desplegado.
+y `setup:drop-legacy` (con la confirmación) después de que el código nuevo esté
+desplegado.
 
 ## URL de uso
 
