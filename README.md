@@ -121,6 +121,19 @@ trabaja contra su propia base de datos. El OTP se imprime en los logs de las
 Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo; se leen
 en Netlify → Logs → Functions.
 
+Los *deploy previews* de pull request están **desactivados en el sitio de
+producción** (`build_settings.skip_prs`): así el código de una rama sin fusionar
+nunca se ejecuta contra la base de datos real. Un preview de producción usa las
+variables de entorno de producción, de modo que un PR con una migración o un
+endpoint destructivo afectaría datos reales antes de ser revisado.
+
+El preview del PR sí se genera en el sitio de pruebas, que apunta a la base de
+datos de pruebas:
+
+```txt
+https://deploy-preview-<numero-de-pr>--gadgetdesign-dev.netlify.app
+```
+
 ## Flujo de trabajo
 
 `main` está protegida en GitHub: no acepta commits directos y exige un pull
