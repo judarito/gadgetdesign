@@ -6,6 +6,7 @@ import {
   LockKeyhole,
   LogOut,
   Mail,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -40,6 +41,7 @@ const selectedSuggestionId = ref(null)
 const newDraft = ref({ key: '', value: '', dataType: 'text', protected: false })
 const auth = ref({ authorized: false, canRequestCode: false, emailHint: '' })
 const accessDialog = ref(false)
+const newDataDialog = ref(false)
 const deleteDataDialog = ref(false)
 const privacyDialog = ref(false)
 const deleteEntityDialog = ref(false)
@@ -48,7 +50,7 @@ const deleteEntityConfirmation = ref('')
 const entityDeleted = ref(false)
 const isOffline = ref(!navigator.onLine)
 const accessCode = ref('')
-const isLoading = ref(false)
+const isLoading = ref(true)
 const isSaving = ref(false)
 const savingKey = ref(null)
 const editingId = ref(null)
@@ -162,6 +164,7 @@ function handleOffline() {
 async function loadEntity() {
   if (!routeContext.isValid) {
     errorMessage.value = 'Abre una URL válida de Gadget Design.'
+    isLoading.value = false
     return
   }
 
@@ -172,10 +175,10 @@ async function loadEntity() {
 
 async function saveNewDraft(draft, requestKey) {
   if (!draft.key.trim() || !draft.value.trim() || !canUseCrud.value || isAtCustomDataLimit.value) {
-    return
+    return false
   }
 
-  await runRequest(async () => {
+  return runRequest(async () => {
     applyContext(
       await createCustomData(routeContext.categoryCode, routeContext.token, {
         key: draft.key,
@@ -186,6 +189,23 @@ async function saveNewDraft(draft, requestKey) {
       }),
     )
   }, false, requestKey, 'Dato agregado correctamente.')
+}
+
+function openNewDataDialog() {
+  runProtectedAction(() => {
+    newDataDialog.value = true
+  })
+}
+
+function closeNewDataDialog() {
+  if (isSaving.value) return
+  newDataDialog.value = false
+  newDraft.value = { key: '', value: '', dataType: 'text', protected: false }
+}
+
+async function saveNewCustomData() {
+  const saved = await saveNewDraft(newDraft.value, 'new')
+  if (saved) newDataDialog.value = false
 }
 
 function selectSuggestion(draft) {
@@ -539,9 +559,13 @@ function getCategoryCopy(currentCategory) {
             <p>Consulta y actualiza los datos vinculados a este código QR</p>
           </div>
 
-          <v-sheet class="id-card" rounded="xl" border>
+          <v-sheet class="id-card" rounded="xl" border :aria-busy="isLoading">
             <h2>Identificador</h2>
-            <div class="identifier-pill">
+            <div v-if="isLoading" class="identifier-pill identifier-pill--skeleton" aria-hidden="true">
+              <span class="skeleton skeleton-tag" />
+              <span class="skeleton skeleton-identifier" />
+            </div>
+            <div v-else class="identifier-pill">
               <span class="tag-icon" aria-hidden="true">
                 <svg viewBox="0 0 64 64" role="img">
                   <path d="M7.9 33.9 33.8 8h18.7a3.5 3.5 0 0 1 3.5 3.5v18.7L30.1 56.1a5 5 0 0 1-7.1 0L7.9 41a5 5 0 0 1 0-7.1Z" />
@@ -552,8 +576,15 @@ function getCategoryCopy(currentCategory) {
             </div>
           </v-sheet>
 
-          <v-sheet class="data-card" rounded="xl" border>
-            <div class="section-title">
+          <v-sheet class="data-card" rounded="xl" border :aria-busy="isLoading">
+            <div v-if="isLoading" class="section-title section-title--skeleton" aria-hidden="true">
+              <span class="skeleton skeleton-section-icon" />
+              <div>
+                <span class="skeleton skeleton-section-title" />
+                <span class="skeleton skeleton-section-copy" />
+              </div>
+            </div>
+            <div v-else class="section-title">
               <span class="square-icon" aria-hidden="true">
                 <AppIcon name="user" />
               </span>
@@ -616,7 +647,26 @@ function getCategoryCopy(currentCategory) {
                 </v-btn>
               </div>
 
-              <div v-if="isLoading" class="status-message">Cargando información...</div>
+              <div v-if="isLoading" class="loading-skeleton" role="status" aria-live="polite">
+                <span class="sr-only">Cargando información...</span>
+                <div class="skeleton-access" aria-hidden="true">
+                  <span class="skeleton skeleton-access-icon" />
+                  <span class="skeleton skeleton-access-copy" />
+                  <span class="skeleton skeleton-access-action" />
+                </div>
+                <div class="skeleton-meta" aria-hidden="true">
+                  <span class="skeleton skeleton-meta-line" />
+                  <span class="skeleton skeleton-meta-line skeleton-meta-line--short" />
+                </div>
+                <div class="skeleton-list" aria-hidden="true">
+                  <div v-for="row in 3" :key="row" class="skeleton-row">
+                    <span class="skeleton skeleton-row-icon" />
+                    <span class="skeleton skeleton-row-key" />
+                    <span class="skeleton skeleton-row-value" />
+                    <span class="skeleton skeleton-row-action" />
+                  </div>
+                </div>
+              </div>
 
             <div v-if="!isLoading" class="inline-header">
               <span>{{ helperText }}</span>
@@ -838,86 +888,22 @@ function getCategoryCopy(currentCategory) {
               </form>
             </div>
 
-            <div v-if="!isLoading && !isAtCustomDataLimit" class="new-data-intro">
-              <strong>Agregar otro dato</strong>
-              <span>{{ categoryCopy.newData }}</span>
-            </div>
-
-            <form
-              v-if="!isLoading && !isAtCustomDataLimit"
-              class="inline-row new-data-row"
-              @submit.prevent="saveNewDraft(newDraft, 'new')"
-            >
-              <span class="row-icon" aria-hidden="true">
-                <AppIcon name="file" />
-              </span>
-              <label>
-                <span>Nuevo dato</span>
-                <input
-                  v-model="newDraft.key"
-                  :disabled="!canUseCrud"
-                  :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
-                  placeholder="Ej. Raza"
-                  aria-label="Nuevo dato personalizado"
-                />
-              </label>
-              <label>
-                <span>Tipo de información</span>
-                <select v-model="newDraft.dataType" :disabled="!canUseCrud" aria-label="Formato del nuevo dato">
-                  <option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">
-                    {{ type.label }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                <span>Valor</span>
-                <div class="value-input-shell" :class="{ 'value-input-shell--date': newDraft.dataType === 'date' }">
-                  <input
-                    v-model="newDraft.value"
-                    :type="getDataType(newDraft.dataType).inputType"
-                    :disabled="!canUseCrud"
-                    :maxlength="IDENTIFICATION_MAX_LENGTH"
-                    :placeholder="getDataType(newDraft.dataType).placeholder"
-                    aria-label="Valor del nuevo dato"
-                    @pointerdown.capture="openDatePicker($event, newDraft.dataType)"
-                  />
-                  <button
-                    v-if="newDraft.dataType === 'date'"
-                    class="date-picker-trigger"
-                    type="button"
-                    tabindex="-1"
-                    aria-label="Abrir selector de fecha"
-                    @click="openDatePickerFromTrigger"
-                  />
-                  <CalendarDays v-if="newDraft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
-                </div>
-              </label>
-              <label class="protection-toggle">
-                <input v-model="newDraft.protected" type="checkbox" />
-                <span><LockKeyhole :size="16" /> Proteger valor</span>
-              </label>
+            <div v-if="!isLoading && !isAtCustomDataLimit" class="new-data-action">
+              <div>
+                <strong>Agregar otro dato</strong>
+                <span>{{ categoryCopy.newData }}</span>
+              </div>
               <v-btn
-                class="save-button"
-                :class="{ 'save-button--locked': !auth.authorized }"
                 color="primary"
-                :disabled="auth.authorized
-                  ? !canUseCrud || !newDraft.key.trim() || !newDraft.value.trim()
-                  : isLoading || isSaving || !auth.canRequestCode"
-                :loading="savingKey === 'new'"
-                :type="auth.authorized ? 'submit' : 'button'"
                 variant="flat"
-                @click="!auth.authorized && requestProtectedAccess()"
+                :disabled="isLoading || isSaving || (!auth.authorized && !auth.canRequestCode)"
+                @click="openNewDataDialog"
               >
-                <template v-if="auth.authorized">
-                  <span class="plus-icon" aria-hidden="true" />
-                  Agregar
-                </template>
-                <template v-else>
-                  <LockKeyhole :size="19" />
-                  Obtener código
-                </template>
+                <Plus v-if="auth.authorized" :size="19" />
+                <LockKeyhole v-else :size="18" />
+                {{ auth.authorized ? 'Agregar dato' : 'Verificar para agregar' }}
               </v-btn>
-            </form>
+            </div>
 
               <button
                 v-if="entity && !isLoading"
@@ -952,6 +938,79 @@ function getCategoryCopy(currentCategory) {
           <div>
             <v-btn variant="text" type="button" @click="accessDialog = false">Cancelar</v-btn>
             <v-btn color="primary" type="submit" variant="flat" :disabled="accessCode.length !== 6" :loading="savingKey === 'verify-access'">Verificar</v-btn>
+          </div>
+        </form>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="newDataDialog" max-width="620" persistent>
+      <v-card class="new-data-dialog">
+        <div class="new-data-dialog__heading">
+          <div class="new-data-dialog__icon"><Plus :size="26" /></div>
+          <div>
+            <h2>Agregar un dato</h2>
+            <p>{{ categoryCopy.newData }}</p>
+          </div>
+        </div>
+
+        <form class="inline-row new-data-form" @submit.prevent="saveNewCustomData">
+          <label class="new-data-form__key">
+            <span>Nombre del dato</span>
+            <input
+              v-model="newDraft.key"
+              :disabled="!canUseCrud"
+              :maxlength="CUSTOM_DATA_KEY_MAX_LENGTH"
+              placeholder="Ej. Raza"
+              autofocus
+            />
+          </label>
+          <label>
+            <span>Cómo se responde</span>
+            <select v-model="newDraft.dataType" :disabled="!canUseCrud" aria-label="Formato del nuevo dato">
+              <option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">
+                {{ type.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>Valor</span>
+            <div class="value-input-shell" :class="{ 'value-input-shell--date': newDraft.dataType === 'date' }">
+              <input
+                v-model="newDraft.value"
+                :type="getDataType(newDraft.dataType).inputType"
+                :disabled="!canUseCrud"
+                :maxlength="IDENTIFICATION_MAX_LENGTH"
+                :placeholder="getDataType(newDraft.dataType).placeholder"
+                @pointerdown.capture="openDatePicker($event, newDraft.dataType)"
+              />
+              <button
+                v-if="newDraft.dataType === 'date'"
+                class="date-picker-trigger"
+                type="button"
+                tabindex="-1"
+                aria-label="Abrir selector de fecha"
+                @click="openDatePickerFromTrigger"
+              />
+              <CalendarDays v-if="newDraft.dataType === 'date'" class="date-picker-icon" :size="19" aria-hidden="true" />
+            </div>
+          </label>
+          <label class="protection-toggle new-data-form__protection">
+            <input v-model="newDraft.protected" type="checkbox" />
+            <span><LockKeyhole :size="16" /> Proteger este valor con código</span>
+          </label>
+          <div class="dialog-actions new-data-form__actions">
+            <v-btn variant="text" type="button" :disabled="isSaving" @click="closeNewDataDialog">
+              Cancelar
+            </v-btn>
+            <v-btn
+              color="primary"
+              type="submit"
+              variant="flat"
+              :disabled="!canUseCrud || !newDraft.key.trim() || !newDraft.value.trim()"
+              :loading="savingKey === 'new'"
+            >
+              <Plus :size="18" /> Agregar dato
+            </v-btn>
           </div>
         </form>
       </v-card>
@@ -1318,6 +1377,47 @@ function getCategoryCopy(currentCategory) {
   line-height: 1;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skeleton {
+  display: block;
+  overflow: hidden;
+  background: linear-gradient(90deg, #e5eef8 20%, #f5f9fd 42%, #e5eef8 64%);
+  background-size: 220% 100%;
+  border-radius: 7px;
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -120% 0; }
+}
+
+.identifier-pill--skeleton {
+  pointer-events: none;
+}
+
+.skeleton-tag {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+}
+
+.skeleton-identifier {
+  width: min(46%, 340px);
+  height: 42px;
+}
+
 .id-card > p {
   margin: 12px 0 0;
   color: #5570ad;
@@ -1342,6 +1442,121 @@ function getCategoryCopy(currentCategory) {
   color: #5a6ea8;
   font-size: 1.08rem;
   line-height: 1.25;
+}
+
+.section-title--skeleton > div {
+  display: grid;
+  width: min(65%, 420px);
+  gap: 9px;
+}
+
+.skeleton-section-icon {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+}
+
+.skeleton-section-title {
+  width: 54%;
+  height: 19px;
+}
+
+.skeleton-section-copy {
+  width: 84%;
+  height: 14px;
+}
+
+.loading-skeleton {
+  display: grid;
+  gap: 14px;
+}
+
+.skeleton-access {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 126px;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 13px 14px;
+  border: 1px solid #e0eaf5;
+  border-radius: 10px;
+  background: #f7fafe;
+}
+
+.skeleton-access-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.skeleton-access-copy {
+  width: min(76%, 460px);
+  height: 28px;
+}
+
+.skeleton-access-action {
+  width: 126px;
+  height: 40px;
+  border-radius: 9px;
+}
+
+.skeleton-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 2px;
+}
+
+.skeleton-meta-line {
+  width: 150px;
+  height: 12px;
+}
+
+.skeleton-meta-line--short {
+  width: 118px;
+}
+
+.skeleton-list {
+  overflow: hidden;
+  border: 1px solid #e0ebf8;
+  border-radius: 14px;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: 34px minmax(100px, .9fr) minmax(120px, 1fr) 42px;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e7eff8;
+}
+
+.skeleton-row:last-child {
+  border-bottom: 0;
+}
+
+.skeleton-row-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.skeleton-row-key {
+  width: 72%;
+  height: 16px;
+}
+
+.skeleton-row-value {
+  width: 58%;
+  height: 16px;
+}
+
+.skeleton-row-action {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
 }
 
 .access-panel {
@@ -1523,30 +1738,6 @@ function getCategoryCopy(currentCategory) {
   width: 20px;
   height: 20px;
   margin-right: 7px;
-}
-
-.plus-icon {
-  position: relative;
-  width: 24px;
-  height: 24px;
-  margin-right: 8px;
-}
-
-.plus-icon::before,
-.plus-icon::after {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 22px;
-  height: 2px;
-  content: "";
-  background: currentColor;
-  border-radius: 99px;
-  transform: translate(-50%, -50%);
-}
-
-.plus-icon::after {
-  transform: translate(-50%, -50%) rotate(90deg);
 }
 
 .suggestions-panel {
@@ -1813,14 +2004,6 @@ function getCategoryCopy(currentCategory) {
   height: 22px;
 }
 
-.new-data-row {
-  grid-template-columns: 38px minmax(0, 0.8fr) minmax(130px, 0.75fr) minmax(0, 1fr) auto auto;
-  padding: 12px;
-  border: 1px solid #d7e7f8;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(235, 247, 255, 0.98), rgba(244, 250, 255, 0.94));
-}
-
 .access-dialog { padding: 24px; text-align: center; }
 .access-dialog__icon { display: grid; width: 54px; height: 54px; margin: 0 auto 12px; place-items: center; color: #0873ff; background: #eaf4ff; border-radius: 50%; }
 .access-dialog h2 { margin: 0; color: #071045; font-size: 1.35rem; }
@@ -2013,21 +2196,95 @@ function getCategoryCopy(currentCategory) {
   line-height: 1.45;
 }
 
-.new-data-intro {
+.new-data-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 10px;
+  padding: 15px 2px 0;
+  border-top: 1px solid #e0ebf8;
+}
+
+.new-data-action > div {
   display: grid;
   gap: 2px;
-  margin: 4px 2px 9px;
   color: #304d89;
 }
 
-.new-data-intro strong {
+.new-data-action strong {
   color: #11154b;
   font-size: 0.98rem;
 }
 
-.new-data-intro span {
+.new-data-action span {
   font-size: 0.86rem;
   line-height: 1.35;
+}
+
+.new-data-action :deep(.v-btn) {
+  flex: 0 0 auto;
+  min-height: 42px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.new-data-action :deep(.v-btn__content),
+.new-data-form__actions :deep(.v-btn__content) {
+  gap: 7px;
+}
+
+.new-data-dialog {
+  padding: 24px;
+  color: #071045;
+}
+
+.new-data-dialog__heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.new-data-dialog__icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #0873ff;
+  background: #eaf4ff;
+  border-radius: 10px;
+}
+
+.new-data-dialog h2,
+.new-data-dialog p {
+  margin: 0;
+}
+
+.new-data-dialog h2 {
+  color: #071045;
+  font-size: 1.35rem;
+}
+
+.new-data-dialog p {
+  margin-top: 3px;
+  color: #607194;
+  line-height: 1.4;
+}
+
+.new-data-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: 20px;
+}
+
+.new-data-form__key,
+.new-data-form__protection,
+.new-data-form__actions {
+  grid-column: 1 / -1;
+}
+
+.new-data-form__actions {
+  margin-top: 6px;
 }
 
 @media (max-width: 1024px) {
@@ -2077,36 +2334,24 @@ function getCategoryCopy(currentCategory) {
     padding: 8px 10px;
   }
 
-  .new-data-row,
   .data-row:has(label) {
     grid-template-columns: 34px minmax(0, 1fr) auto;
     align-items: end;
   }
 
-  .new-data-row label:first-of-type,
   .data-row label:first-of-type {
     grid-column: 2 / -1;
   }
 
-  .new-data-row label:nth-of-type(2),
-  .new-data-row label:nth-of-type(3),
-  .new-data-row .protection-toggle,
   .data-row label:nth-of-type(2),
   .data-row label:nth-of-type(3),
   .data-row .protection-toggle {
     grid-column: 2;
   }
 
-  .new-data-row .row-icon,
   .data-row:has(label) .row-icon {
     grid-row: 1 / span 4;
     align-self: center;
-  }
-
-  .new-data-row .save-button {
-    grid-row: 5;
-    grid-column: 2 / -1;
-    width: 100%;
   }
 
   .data-row:has(label) .row-actions {
@@ -2161,8 +2406,50 @@ function getCategoryCopy(currentCategory) {
     flex-direction: column;
   }
 
+  .skeleton-identifier {
+    width: 66%;
+    height: 34px;
+  }
+
+  .skeleton-access {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .skeleton-access-action {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .skeleton-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .skeleton-row {
+    grid-template-columns: 32px minmax(0, 1fr) 42px;
+    gap: 10px;
+  }
+
+  .skeleton-row-key {
+    grid-column: 2;
+    width: 72%;
+  }
+
+  .skeleton-row-value {
+    grid-row: 2;
+    grid-column: 2;
+    width: 55%;
+  }
+
+  .skeleton-row-action {
+    grid-row: 1 / span 2;
+    grid-column: 3;
+  }
+
   .privacy-dialog,
-  .confirmation-dialog {
+  .confirmation-dialog,
+  .new-data-dialog {
     padding: 20px;
   }
 
@@ -2178,8 +2465,7 @@ function getCategoryCopy(currentCategory) {
   }
 
   .inline-row,
-  .data-row,
-  .new-data-row {
+  .data-row {
     grid-template-columns: 34px minmax(0, 1fr) auto;
     align-items: end;
   }
@@ -2217,28 +2503,23 @@ function getCategoryCopy(currentCategory) {
     grid-column: 2;
   }
 
-  .data-row label:first-of-type,
-  .new-data-row label:first-of-type {
+  .data-row label:first-of-type {
     grid-column: 2 / -1;
   }
 
-  .data-row label:nth-of-type(2),
-  .new-data-row label:nth-of-type(2) {
+  .data-row label:nth-of-type(2) {
     grid-column: 2;
   }
 
-  .data-row label:nth-of-type(3),
-  .new-data-row label:nth-of-type(3) {
+  .data-row label:nth-of-type(3) {
     grid-column: 2;
   }
 
-  .data-row .protection-toggle,
-  .new-data-row .protection-toggle {
+  .data-row .protection-toggle {
     grid-column: 2;
   }
 
-  .data-row .row-icon,
-  .new-data-row .row-icon {
+  .data-row .row-icon {
     grid-row: 1 / span 4;
     align-self: center;
   }
@@ -2264,22 +2545,35 @@ function getCategoryCopy(currentCategory) {
     align-self: center;
   }
 
-  .new-data-row .save-button {
-    grid-row: 5;
-    grid-column: 2 / -1;
-    width: 100%;
-  }
-
-  .new-data-row .save-button--locked {
-    gap: 7px;
-  }
-
-  .new-data-row .plus-icon {
-    margin: 0;
-  }
-
   .save-button {
     width: 100%;
+  }
+
+  .new-data-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .new-data-action :deep(.v-btn) {
+    width: 100%;
+  }
+
+  .new-data-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-data-form > label,
+  .new-data-form__key,
+  .new-data-form__protection,
+  .new-data-form__actions {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: #e8f0f8;
   }
 }
 </style>
