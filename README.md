@@ -57,6 +57,25 @@ RESEND_FROM
 No configures `LOCAL_TURSO_URL` en producción. Las variables privadas no se
 incluyen en el bundle del navegador.
 
+### Caché de las lecturas públicas
+
+La lectura anónima de una ficha se puede cachear 60 s en el CDN, y esa caché
+solo se activa si el entorno tiene `NETLIFY_PURGE_API_TOKEN`, que es lo que
+permite invalidarla al escribir:
+
+- **Con token** (el runtime desplegado lo tiene): la lectura pública se sirve de
+  caché y se purga por etiquetas en cada edición, cambio de cliente o borrado.
+- **Sin token** (tu equipo en local): la lectura responde `no-store`, siempre
+  fresca.
+
+En local no configures ese token: haría que las Functions intentaran purgar la
+caché del sitio al que está vinculado el repositorio, que es el de producción.
+
+El condicional existe por un motivo: durante un tiempo la purga no se ejecutaba
+—el guardia consultaba `CONTEXT`, que no existe en este runtime— y cada escritura
+dejaba la página pública mostrando datos viejos hasta que expiraba el TTL, hasta
+60 segundos viendo una ficha ya borrada. Ante la duda, mejor no cachear.
+
 ### Entorno de pruebas (rama `dev`)
 
 El sitio `gadgetdesign-dev` usa una base de datos Turso propia y secretos
@@ -137,8 +156,19 @@ falsificar sesiones ni descifrar datos de producción.
 
 El sitio de pruebas es público y no tiene protección por contraseña, por eso
 trabaja contra su propia base de datos. El OTP se imprime en los logs de las
-Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo; se leen
-en Netlify → Logs → Functions.
+Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo.
+
+Para leerlo sin abrir el panel de Netlify, la CLI sirve, pero hay que apuntarla al
+sitio de pruebas: el repositorio está vinculado al de producción
+(`.netlify/state.json`), así que **cualquier comando de Netlify lanzado desde la
+raíz apunta a producción**. Desde un directorio vinculado a `gadgetdesign-dev`:
+
+```sh
+netlify logs --function client --since 5m
+```
+
+La ingesta tarda unos 20 segundos, así que si acabas de pedir el código espera un
+poco o usa `--follow`.
 
 Los *deploy previews* de pull request están **desactivados en el sitio de
 producción** (`build_settings.skip_prs`): así el código de una rama sin fusionar

@@ -308,25 +308,33 @@ POST admin?action=bulk-create-entities
 
 ---
 
-## 5. Caché: un detalle que rompe el portal si se olvida
+## 5. Caché: el detalle que rompía el portal
 
-La lectura pública se cachea 60 s en el CDN y la variación se declara así:
+La lectura pública se cachea 60 s en el CDN. La variación incluye **las dos**
+sesiones, porque las dos cambian la respuesta:
 
 ```js
 // netlify/functions/_lib/cache.mjs
-const CACHEABLE_CONTEXT_VARY = `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}`
+const CACHEABLE_CONTEXT_VARY =
+  `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}|${CLIENT_SESSION_COOKIE}`
 ```
 
 Y en `entity.mjs`:
 
 ```js
-const isAnonymous = !getCookie(request, ENTITY_COOKIE)
+const isAnonymous = !getCookie(request, ENTITY_COOKIE) && !getCookie(request, CLIENT_COOKIE)
 ```
 
-Si se añade la sesión de cliente y **no** se actualizan estas dos líneas, un
-cliente que entre desde el portal recibirá la respuesta **anónima cacheada**: verá
-sus datos protegidos enmascarados y creerá que el portal no funciona. Hay que
-añadir `gd_client_session` a la variación y a la comprobación de anonimato.
+Esta era la trampa: si se añadía la sesión de cliente y **no** se actualizaban
+esas dos líneas, un cliente que entrara desde el portal recibiría la respuesta
+**anónima cacheada** —vería sus datos protegidos enmascarados y creería que el
+portal no funciona—. Está implementado y verificado en vivo contra el CDN real:
+con la caché poblada por dos lecturas anónimas, una lectura con la cookie del
+portal devuelve `authorized: true`.
+
+La caché solo se activa si el entorno tiene `NETLIFY_PURGE_API_TOKEN`, que es lo
+que permite invalidarla al escribir. Sin él, la lectura responde `no-store`.
+Ver [Caché de las lecturas públicas](../README.md#caché-de-las-lecturas-públicas).
 
 ---
 
