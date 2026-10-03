@@ -4,6 +4,9 @@ import {
   sanitizeText,
 } from './validation'
 
+/** Número máximo de datos personalizados por ficha. */
+export const CUSTOM_DATA_LIMIT = 10
+
 export function parseCustomData(rawValue) {
   if (!rawValue) return []
 

@@ -56,7 +56,10 @@ import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
 
-const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
+// El origen real, no un dominio fijo: el panel se usa igual en producción, en
+// el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
+// está corriendo.
+const PUBLIC_ORIGIN = window.location.origin
 
 const authenticated = ref(false)
 const password = ref('')

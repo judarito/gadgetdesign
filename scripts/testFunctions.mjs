@@ -2,13 +2,8 @@ import { spawn } from 'node:child_process'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
 import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
-import { CLIENT_COOKIE, CLIENT_SESSION_SECONDS, signSession } from '../netlify/functions/_lib/security.mjs'
 
 const env = loadEnv('', process.cwd(), '')
-
-// La sesión del portal la emite client.mjs en la fase 2. Mientras tanto, aquí se
-// firma con el mismo secreto para poder probar la autorización por pertenencia.
-process.env.APP_AUTH_SECRET ??= env.APP_AUTH_SECRET
 
 const server = spawn('npm', ['run', 'dev'], {
   cwd: process.cwd(),
@@ -55,8 +50,9 @@ try {
   await expectStatus(() => request('entity', 'context', { query: { token: "' OR 1=1 --" } }), 400,
     'Una ruta inválida debe rechazarse sin ejecutar SQL.')
 
+  const entityOtpMark = logs.length
   await request('entity', 'request-code', { method: 'POST', body: route })
-  const code = await waitForOtp()
+  const code = await waitForOtp(entityOtpMark)
   assert(/^\d{6}$/.test(code), 'Debe generarse un OTP de seis dígitos.')
 
   const verification = await request('entity', 'verify-code', {
@@ -223,8 +219,61 @@ try {
   const moto1 = clientEntities.items.find((item) => item.identification === 'MOTO-001')
   const moto2 = clientEntities.items.find((item) => item.identification === 'MOTO-002')
 
+  // --- Portal del cliente -------------------------------------------------
+  await expectStatus(() => request('client', 'context'), 401,
+    'El portal debe exigir sesión para listar las fichas.')
+
+  // Anti-enumeración: un correo desconocido responde igual y no envía nada.
+  const unknownMark = logs.length
+  const unknown = await request('client', 'request-code', {
+    method: 'POST', body: { email: 'desconocido@example.com' },
+  })
+  assert(unknown.ok === true, 'Un correo desconocido debe responder igual que uno válido.')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert(!logs.slice(unknownMark).includes('Código local para'),
+    'Un correo desconocido no debe generar ningún envío.')
+
+  const portalMark = logs.length
+  await request('client', 'request-code', {
+    method: 'POST', body: { email: 'finca@example.com' },
+  })
+  const portalCode = await waitForOtp(portalMark)
+
+  await expectStatus(() => request('client', 'verify-code', {
+    method: 'POST', body: { email: 'finca@example.com', code: '000000' },
+  }), 400, 'Un código incorrecto debe rechazarse en el portal.')
+
+  const portalLogin = await request('client', 'verify-code', {
+    method: 'POST', body: { email: 'finca@example.com', code: portalCode }, includeResponse: true,
+  })
+  const clientCookie = getCookieHeader(portalLogin.response)
+  assert(clientCookie.startsWith('gd_client_session='),
+    'El portal debe emitir su propia cookie de sesión.')
+  assert(portalLogin.data.cliente.email === 'finca@example.com', 'El portal debe saludar al cliente.')
+  assert(portalLogin.data.total === 4, 'El portal debe listar todas las fichas del cliente.')
+
+  const portalContext = await request('client', 'context', {
+    cookie: clientCookie, includeResponse: true,
+  })
+  assert(portalContext.data.total === 4, 'El listado del portal debe mantenerse con la sesión.')
+  assert(portalContext.response.headers.get('netlify-cdn-cache-control') === 'no-store',
+    'El listado del portal nunca debe cachearse en el CDN.')
+
+  const portalSearch = await request('client', 'context', {
+    cookie: clientCookie, query: { search: 'MOTO-002' },
+  })
+  assert(portalSearch.total === 1 && portalSearch.items[0].identificacion === 'MOTO-002',
+    'El buscador del portal debe filtrar las fichas del cliente.')
+
+  // La ficha se abre desbloqueada con la sesión del portal.
+  const unlocked = await request('entity', 'context', {
+    query: { token: moto1.shortCode }, cookie: clientCookie, includeResponse: true,
+  })
+  assert(unlocked.data.auth.authorized, 'Abrir una ficha desde el portal debe verla autorizada.')
+  assert(unlocked.response.headers.get('netlify-cdn-cache-control') === 'no-store',
+    'Una lectura con sesión de portal no debe servirse desde la caché pública.')
+
   // La sesión del portal cubre todas las fichas del cliente.
-  const clientCookie = clientSessionCookie(newClient.id, 1)
   const byClient1 = await request('entity', 'create-data', {
     method: 'POST', cookie: clientCookie,
     body: { token: moto1.shortCode, data: { key: 'Cilindraje', value: '150', dataType: 'number' } },
@@ -258,6 +307,8 @@ try {
     method: 'POST', cookie: clientCookie,
     body: { token: moto1.shortCode, data: { key: 'Tras cambio', value: 'No', dataType: 'text' } },
   }), 401, 'Cambiar el correo del cliente debe cortar sus sesiones.')
+  await expectStatus(() => request('client', 'context', { cookie: clientCookie }), 401,
+    'El portal debe cerrar la sesión cuando cambia el correo.')
 
   // Desactivar al cliente deja sus fichas en solo lectura, sin borrar nada.
   await request('admin', 'save-client', {
@@ -296,6 +347,10 @@ try {
   console.log('✓ Creación masiva por rango con detección de colisiones')
   console.log('✓ Autorización por pertenencia (sesión de cliente y de ficha)')
   console.log('✓ Revocación al cambiar el correo y solo lectura al desactivar')
+  console.log('✓ Portal del cliente: OTP propio y listado de sus fichas')
+  console.log('✓ Anti-enumeración en el portal (correo desconocido = misma respuesta)')
+  console.log('✓ La ficha se abre desbloqueada con la sesión del portal')
+  console.log('✓ La lectura con sesión de portal nunca se sirve desde la caché pública')
 } finally {
   try {
     process.kill(-server.pid, 'SIGTERM')
@@ -336,9 +391,11 @@ async function waitForServer() {
   throw new Error(`El entorno local no inició.\n${logs.slice(-4000)}`)
 }
 
-async function waitForOtp() {
+async function waitForOtp(since = 0) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const match = logs.match(/Código local para .*?: (\d{6})/)
+    // Solo lo registrado después de la petición: si no, devolvería el código de
+    // una prueba anterior que sigue en el log.
+    const match = logs.slice(since).match(/Código local para .*?: (\d{6})/)
     if (match) return match[1]
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
@@ -349,11 +406,6 @@ function getCookieHeader(response) {
   return response.headers.get('set-cookie')?.split(';')[0] || ''
 }
 
-/** Cookie de portal firmada con el mismo secreto que usan las Functions. */
-function clientSessionCookie(clienteId, ver) {
-  const token = signSession({ type: 'client', clienteId, ver }, CLIENT_SESSION_SECONDS)
-  return `${CLIENT_COOKIE}=${encodeURIComponent(token)}`
-}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)

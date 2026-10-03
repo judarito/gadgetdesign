@@ -2,7 +2,12 @@ import { purgeCache } from '@netlify/functions'
 
 const PUBLIC_CACHE_SECONDS = 60
 const ENTITY_SESSION_COOKIE = 'gd_entity_session'
-const CACHEABLE_CONTEXT_VARY = `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}`
+const CLIENT_SESSION_COOKIE = 'gd_client_session'
+// Las dos sesiones cambian la respuesta: sin la del cliente en la variación,
+// quien entra desde el portal recibiría la lectura anónima cacheada y vería sus
+// datos protegidos enmascarados.
+const CACHEABLE_CONTEXT_VARY =
+  `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}|${CLIENT_SESSION_COOKIE}`
 
 export function publicEntityCacheHeaders(entityId, categoryId) {
   return {

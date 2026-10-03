@@ -1,16 +1,33 @@
+import { isReservedPath } from './routes'
+
 const SHORT_CODE_LENGTH = 8
 const SHORT_CODE_BYTES = 6
 const MAX_GENERATION_ATTEMPTS = 16
+const ALPHANUMERIC_EDGE = /^[A-Za-z0-9][\s\S]*[A-Za-z0-9]$/
 
+/**
+ * Código corto de 8 caracteres base64url.
+ *
+ * Se descartan los que empiezan o terminan en guion: el código se imprime en la
+ * etiqueta del QR y un guion suelto se lee como un signo. También se descarta
+ * cualquier código que ocupara una ruta reservada; hoy es imposible porque las
+ * rutas reservadas son más cortas que el código, pero el guardia evita que un
+ * nombre reservado futuro deje una ficha inalcanzable.
+ */
 export function generateShortCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(SHORT_CODE_BYTES))
-  const binary = String.fromCharCode(...bytes)
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    const bytes = crypto.getRandomValues(new Uint8Array(SHORT_CODE_BYTES))
+    const binary = String.fromCharCode(...bytes)
+    const code = btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '')
+      .slice(0, SHORT_CODE_LENGTH)
 
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '')
-    .slice(0, SHORT_CODE_LENGTH)
+    if (ALPHANUMERIC_EDGE.test(code) && !isReservedPath(code)) return code
+  }
+
+  throw new Error('No fue posible generar un código corto válido.')
 }
 
 export async function generateUniqueShortCode(db) {

@@ -8,6 +8,7 @@ import {
 import {
   HttpError,
   clearCookie,
+  getClientIp,
   getCookie,
   handleError,
   json,
@@ -29,14 +30,17 @@ import {
   safeEqualHex,
   signSession,
 } from './_lib/security.mjs'
-import { createCustomDataItem, parseCustomData, serializeCustomData } from '../../src/services/customData.js'
+import {
+  CUSTOM_DATA_LIMIT,
+  createCustomDataItem,
+  parseCustomData,
+  serializeCustomData,
+} from '../../src/services/customData.js'
 import {
   sanitizeCustomDataInput,
   validateCategoryCode,
   validateEntityToken,
 } from '../../src/services/validation.js'
-
-const CUSTOM_DATA_LIMIT = 10
 
 export default async function handler(request) {
   try {
@@ -45,7 +49,7 @@ export default async function handler(request) {
 
     if (request.method === 'GET' && action === 'context') {
       const context = await getContext(request, routeInput(url.searchParams))
-      const isAnonymous = !getCookie(request, ENTITY_COOKIE)
+      const isAnonymous = !getCookie(request, ENTITY_COOKIE) && !getCookie(request, CLIENT_COOKIE)
       const cacheHeaders = isAnonymous && context.entity
         ? publicEntityCacheHeaders(context.entity.id, context.category.id)
         : privateEntityCacheHeaders()
@@ -154,7 +158,7 @@ async function requestCode(request, payload) {
     sql: `INSERT INTO EntityAccessCodes
           (entity_id, code_hash, expires_at, attempts, consumed, request_ip, created_at)
           VALUES (?, ?, ?, 0, 0, ?, ?)`,
-    args: [entity.id, hashOtp(entity.id, code), now + OTP_SECONDS, ip, now],
+    args: [entity.id, hashOtp('entity', entity.id, code), now + OTP_SECONDS, ip, now],
   })
   try {
     await sendAccessCode({
@@ -199,7 +203,7 @@ async function verifyCode(request, payload) {
     throw new HttpError(429, 'El código fue bloqueado por demasiados intentos.')
   }
 
-  if (!safeEqualHex(String(accessCode.code_hash), hashOtp(entity.id, code))) {
+  if (!safeEqualHex(String(accessCode.code_hash), hashOtp('entity', entity.id, code))) {
     await db.execute({
       sql: 'UPDATE EntityAccessCodes SET attempts = attempts + 1 WHERE id = ?',
       args: [accessCode.id],
@@ -379,13 +383,6 @@ function emptyAuth() {
   return { authorized: false, canRequestCode: false, emailHint: '' }
 }
 
-function getClientIp(request) {
-  return String(
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for') ||
-    'local',
-  ).split(',')[0].trim().slice(0, 64)
-}
 
 function asBadRequest(callback) {
   try {

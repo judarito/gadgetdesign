@@ -116,6 +116,7 @@ export function requireClientSession(request, cliente) {
   if (
     !session ||
     !cliente ||
+    !cliente.active ||
     Number(session.clienteId) !== Number(cliente.id) ||
     Number(session.ver) !== Number(cliente.authVersion)
   ) {
@@ -128,8 +129,12 @@ export function generateOtp() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
-export function hashOtp(entityId, code) {
-  return createHmac('sha256', authSecret()).update(`${entityId}:${code}`).digest('hex')
+/**
+ * Hash del OTP con separación de dominio: el mismo id en dos tablas distintas
+ * (una entidad y un cliente) no produce el mismo hash.
+ */
+export function hashOtp(scope, id, code) {
+  return createHmac('sha256', authSecret()).update(`${scope}:${id}:${code}`).digest('hex')
 }
 
 export function safeEqualHex(left, right) {

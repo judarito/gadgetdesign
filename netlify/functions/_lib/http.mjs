@@ -51,6 +51,15 @@ export function getCookie(request, name) {
   return null
 }
 
+/** IP del cliente, para los límites de uso. */
+export function getClientIp(request) {
+  return String(
+    request.headers.get('x-nf-client-connection-ip') ||
+    request.headers.get('x-forwarded-for') ||
+    'local',
+  ).split(',')[0].trim().slice(0, 64)
+}
+
 export function sessionCookie(name, value, maxAge) {
   const secure = secureCookieSuffix()
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`

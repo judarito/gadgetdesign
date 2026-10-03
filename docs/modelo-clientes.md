@@ -1,8 +1,7 @@
 # Modelo de clientes y portal del cliente
 
-Estado: **fase 1 implementada** (tabla `Clientes`, migración, autorización por
-pertenencia, CRUD en el panel y creación masiva). Fases 2 (portal) y 3 (retirar
-`owner_*`) pendientes.
+Estado: **fases 1 y 2 implementadas** (modelo de clientes, autorización por
+pertenencia, panel y portal en `/portal`). Fase 3 (retirar `owner_*`) pendiente.
 
 ## Problema
 

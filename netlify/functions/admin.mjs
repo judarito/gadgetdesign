@@ -16,7 +16,7 @@ import {
   signSession,
   verifySession,
 } from './_lib/security.mjs'
-import { getCookie } from './_lib/http.mjs'
+import { getClientIp, getCookie } from './_lib/http.mjs'
 import { normalizeDataType } from '../../src/services/dataTypes.js'
 import { generateUniqueShortCode, generateUniqueShortCodes } from '../../src/services/shortCode.js'
 import {
@@ -660,13 +660,6 @@ async function generateUniqueToken(db) {
   throw new Error('No fue posible generar un token único.')
 }
 
-function getClientIp(request) {
-  return String(
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for') ||
-    'local',
-  ).split(',')[0].trim().slice(0, 64)
-}
 
 function asBadRequest(callback) {
   try {
