@@ -11,8 +11,10 @@ import { HttpError, getCookie } from './http.mjs'
 
 export const ADMIN_COOKIE = 'gd_admin_session'
 export const ENTITY_COOKIE = 'gd_entity_session'
+export const CLIENT_COOKIE = 'gd_client_session'
 export const ADMIN_SESSION_SECONDS = 8 * 60 * 60
 export const ENTITY_SESSION_SECONDS = 8 * 60 * 60
+export const CLIENT_SESSION_SECONDS = 8 * 60 * 60
 export const OTP_SECONDS = 10 * 60
 
 function authSecret() {
@@ -58,14 +60,86 @@ export function getEntitySession(request) {
   return verifySession(getCookie(request, ENTITY_COOKIE), 'entity')
 }
 
-export function requireEntitySession(request, entity) {
-  const session = getEntitySession(request)
+export function getClientSession(request) {
+  return verifySession(getCookie(request, CLIENT_COOKIE), 'client')
+}
+
+/**
+ * Qué sesión autoriza a escribir en una ficha concreta: 'client', 'entity' o
+ * null.
+ *
+ * Sirven dos: la de la propia ficha (la que emite el OTP desde la página
+ * pública) y la del cliente dueño (la del portal). Sobre esa ficha dan los
+ * mismos permisos de edición; la diferencia es el alcance, porque la de entidad
+ * no vale para las demás fichas del cliente.
+ */
+export function entityAccessScope(request, entity, cliente) {
+  const version = Number(cliente?.authVersion)
+  if (!cliente || !cliente.active || !Number.isFinite(version)) return null
+
+  const clientSession = getClientSession(request)
+  if (
+    clientSession &&
+    Number(clientSession.clienteId) === Number(cliente.id) &&
+    Number(clientSession.ver) === version
+  ) {
+    return 'client'
+  }
+
+  const entitySession = getEntitySession(request)
+  if (
+    entitySession &&
+    Number(entitySession.entityId) === Number(entity.id) &&
+    Number(entitySession.clienteId) === Number(cliente.id) &&
+    Number(entitySession.ver) === version
+  ) {
+    return 'entity'
+  }
+
+  return null
+}
+
+export function hasEntityAccess(request, entity, cliente) {
+  return Boolean(entityAccessScope(request, entity, cliente))
+}
+
+export function requireEntityAccess(request, entity, cliente) {
+  const scope = entityAccessScope(request, entity, cliente)
+  if (!scope) {
+    throw new HttpError(401, 'Valida el código enviado al correo para continuar.')
+  }
+  return scope
+}
+
+/**
+ * Solo la sesión de la propia ficha, no la del portal.
+ *
+ * El cliente administra los datos de sus fichas, pero no las crea ni las borra:
+ * borrar una ficha destruye también todos sus datos y no tiene vuelta atrás, así
+ * que exige haber entrado por el enlace de esa ficha.
+ */
+export function requireEntitySession(request, entity, cliente) {
+  const scope = entityAccessScope(request, entity, cliente)
+  if (scope !== 'entity') {
+    throw new HttpError(
+      401,
+      'Para borrar la ficha entra por su enlace e introduce el código que llega al correo.',
+    )
+  }
+  return scope
+}
+
+/** Sesión del portal, válida para todas las fichas del cliente. */
+export function requireClientSession(request, cliente) {
+  const session = getClientSession(request)
   if (
     !session ||
-    Number(session.entityId) !== Number(entity.id) ||
-    Number(session.authVersion) !== Number(entity.authVersion)
+    !cliente ||
+    !cliente.active ||
+    Number(session.clienteId) !== Number(cliente.id) ||
+    Number(session.ver) !== Number(cliente.authVersion)
   ) {
-    throw new HttpError(401, 'Valida el código enviado al correo para continuar.')
+    throw new HttpError(401, 'Valida el código enviado a tu correo para continuar.')
   }
   return session
 }
@@ -74,8 +148,12 @@ export function generateOtp() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
-export function hashOtp(entityId, code) {
-  return createHmac('sha256', authSecret()).update(`${entityId}:${code}`).digest('hex')
+/**
+ * Hash del OTP con separación de dominio: el mismo id en dos tablas distintas
+ * (una entidad y un cliente) no produce el mismo hash.
+ */
+export function hashOtp(scope, id, code) {
+  return createHmac('sha256', authSecret()).update(`${scope}:${id}:${code}`).digest('hex')
 }
 
 export function safeEqualHex(left, right) {

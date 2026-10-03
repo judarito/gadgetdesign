@@ -5,9 +5,11 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  Contact,
   Copy,
   Download,
   KeyRound,
+  Layers,
   Lightbulb,
   Link,
   LogOut,
@@ -26,20 +28,25 @@ import {
   X,
 } from '@lucide/vue'
 import {
+  bulkCreateEntities,
   changeAdminPassword,
   clearAdminSession,
   createAdminSession,
   createEntity,
   deleteCategory,
+  deleteClient,
   deleteEntity,
   deleteSuggestion,
   hasAdminSession,
   listCategories,
   listCategoryOptions,
+  listClientOptions,
+  listClients,
   listEntities,
   listSuggestions,
   regenerateEntityToken,
   saveCategory,
+  saveClient,
   saveSuggestion,
   updateEntity,
   verifyAdminPassword,
@@ -49,7 +56,13 @@ import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
 
-const PUBLIC_ORIGIN = 'https://gadgetdesign.lat'
+// El origen real, no un dominio fijo: el panel se usa igual en producción, en
+// el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
+// está corriendo.
+const PUBLIC_ORIGIN = window.location.origin
+
+// Debe coincidir con BULK_ENTITY_LIMIT de netlify/functions/admin.mjs.
+const BULK_LIMIT = 200
 
 const authenticated = ref(false)
 const password = ref('')
@@ -60,12 +73,17 @@ const categories = ref([])
 const categoryRows = ref([])
 const suggestions = ref([])
 const entities = ref([])
+const clients = ref([])
+const clientRows = ref([])
 const categoryPagination = ref(emptyPagination())
 const suggestionPagination = ref(emptyPagination())
 const entityPagination = ref(emptyPagination())
+const clientPagination = ref(emptyPagination())
 const selectedCategoryId = ref(null)
 const entityCategoryId = ref(null)
+const entityClienteId = ref(null)
 const entitySearch = ref('')
+const clientSearch = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const errorMessage = ref('')
@@ -73,6 +91,8 @@ const toast = ref({ visible: false, message: '', color: 'success' })
 const categoryDialog = ref(false)
 const suggestionDialog = ref(false)
 const entityDialog = ref(false)
+const clientDialog = ref(false)
+const bulkDialog = ref(false)
 const qrDialog = ref(false)
 const qrEntity = ref(null)
 const qrImageUrl = ref('')
@@ -82,6 +102,8 @@ const printSettings = ref(defaultPrintSettings())
 const categoryDraft = ref(emptyCategory())
 const suggestionDraft = ref(emptySuggestion())
 const entityDraft = ref(emptyEntity())
+const clientDraft = ref(emptyClient())
+const bulkDraft = ref(emptyBulk())
 const securityForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
 
 const activeCategories = computed(() => categories.value.filter((category) => category.active))
@@ -95,15 +117,47 @@ const printMetrics = computed(() => {
 const pageTitle = computed(
   () =>
     ({
+      entities: 'Entidades',
+      clients: 'Clientes',
       categories: 'Categorías',
       suggestions: 'Sugerencias',
-      entities: 'Entidades',
       security: 'Seguridad',
     })[activeView.value],
 )
 
+// Vista previa del rango de la creación masiva, para no crear 100 fichas a
+// ciegas: cuántas salen y cómo se llaman la primera y la última.
+const bulkPreview = computed(() => {
+  const draft = bulkDraft.value
+  const prefix = String(draft.prefix || '').trim()
+  const from = Number(draft.from)
+  const to = Number(draft.to)
+  const pad = Number(draft.pad)
+
+  // Los campos vacíos llegan como '' y Number('') es 0, que pasaría por entero
+  // válido: sin comprobarlo, la vista previa diría "1 ficha" con el rango vacío
+  // y el botón quedaría habilitado para algo que el servidor rechaza.
+  const empty = draft.from === '' || draft.to === '' || draft.pad === ''
+  const invalid = empty
+    || !prefix
+    || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from
+    || !Number.isInteger(pad) || pad < 1 || pad > 10
+    || to - from + 1 > BULK_LIMIT
+
+  if (invalid) return { valid: false, count: 0, first: '', last: '' }
+
+  const count = to - from + 1
+  return {
+    valid: true,
+    count,
+    first: `${prefix}${String(from).padStart(pad, '0')}`,
+    last: `${prefix}${String(to).padStart(pad, '0')}`,
+  }
+})
+
 const navigation = [
   { id: 'entities', label: 'Entidades', icon: Users },
+  { id: 'clients', label: 'Clientes', icon: Contact },
   { id: 'categories', label: 'Categorías', icon: Tag },
   { id: 'suggestions', label: 'Sugerencias', icon: Lightbulb },
   { id: 'security', label: 'Seguridad', icon: ShieldCheck },
@@ -134,17 +188,24 @@ async function logout() {
   await clearAdminSession().catch(() => {})
   authenticated.value = false
   categories.value = []
+  categoryRows.value = []
   suggestions.value = []
   entities.value = []
+  clients.value = []
+  clientRows.value = []
+  categoryPagination.value = emptyPagination()
+  suggestionPagination.value = emptyPagination()
+  entityPagination.value = emptyPagination()
+  clientPagination.value = emptyPagination()
+  entityClienteId.value = null
   password.value = ''
 }
 
 async function loadInitialData() {
   await runLoad(async () => {
-    await loadCategories()
+    await Promise.all([loadCategories(), loadClientOptions()])
     const firstCategory = categories.value[0]
     selectedCategoryId.value ??= firstCategory?.id ?? null
-    entityCategoryId.value ??= null
     await loadEntities()
   })
 }
@@ -157,6 +218,7 @@ async function navigate(view) {
   if (view === 'categories' || view === 'security') return
   if (view === 'suggestions') await loadSuggestions()
   if (view === 'entities') await loadEntities()
+  if (view === 'clients') await loadClients()
 }
 
 async function loadCategories() {
@@ -187,12 +249,38 @@ async function loadEntities() {
   await runLoad(async () => {
     const result = await listEntities({
       categoryId: entityCategoryId.value,
+      clienteId: entityClienteId.value,
       search: entitySearch.value,
       page: entityPagination.value.page,
     })
     entities.value = result.items
     entityPagination.value = result
   })
+}
+
+async function loadClientOptions() {
+  clients.value = await listClientOptions()
+}
+
+async function loadClients() {
+  await runLoad(async () => {
+    const result = await listClients({
+      search: clientSearch.value,
+      page: clientPagination.value.page,
+    })
+    clientRows.value = result.items
+    clientPagination.value = result
+  })
+}
+
+async function applyClientFilters() {
+  clientPagination.value.page = 1
+  await loadClients()
+}
+
+async function changeClientPage(page) {
+  clientPagination.value.page = page
+  await loadClients()
 }
 
 async function applyEntityFilters() {
@@ -222,6 +310,7 @@ function openCategoryDialog(category = null) {
 }
 
 async function submitCategory() {
+  if (isSaving.value) return
   await runAction(async () => {
     await saveCategory(categoryDraft.value)
     categoryDialog.value = false
@@ -257,6 +346,7 @@ function openSuggestionDialog(suggestion = null) {
 }
 
 async function submitSuggestion() {
+  if (isSaving.value) return
   await runAction(async () => {
     await saveSuggestion({
       ...suggestionDraft.value,
@@ -279,22 +369,51 @@ async function removeSuggestion(suggestion) {
 
 function openEntityDialog(entity = null) {
   entityDraft.value = entity
-    ? { ...entity }
-    : emptyEntity(activeCategories.value[0]?.id ?? categories.value[0]?.id ?? null)
+    ? { ...emptyEntity(), ...entity, newClient: emptyClient() }
+    : { ...emptyEntity(activeCategories.value[0]?.id ?? categories.value[0]?.id ?? null), newClient: emptyClient() }
   entityDialog.value = true
   clearMessages()
 }
 
+/**
+ * Resuelve el cliente elegido en el formulario. La opción "nuevo" crea el
+ * cliente primero y deja su id en el borrador: si después falla el guardado de
+ * la ficha (una identificación duplicada, por ejemplo), el reintento reutiliza
+ * el cliente en vez de intentar crearlo otra vez y chocar con un 409.
+ */
+async function resolveDraftClient(draft) {
+  if (draft.clienteId !== 'new') return draft.clienteId ?? null
+
+  const created = await saveClient({
+    name: draft.newClient.name,
+    email: draft.newClient.email,
+    phone: draft.newClient.phone,
+    active: true,
+  })
+  draft.clienteId = created.id
+  await loadClientOptions()
+  return created.id
+}
+
 async function submitEntity() {
+  if (isSaving.value) return
   const isEditing = Boolean(entityDraft.value.id)
   let createdUrl = ''
   await runAction(async () => {
+    const clienteId = await resolveDraftClient(entityDraft.value)
+    const payload = {
+      id: entityDraft.value.id,
+      identification: entityDraft.value.identification,
+      categoryId: entityDraft.value.categoryId,
+      clienteId,
+    }
+
     if (isEditing) {
-      await updateEntity(entityDraft.value)
+      await updateEntity(payload)
     } else {
-      const access = await createEntity(entityDraft.value)
+      const access = await createEntity(payload)
       const category = categories.value.find(
-        (item) => item.id === Number(entityDraft.value.categoryId),
+        (item) => item.id === Number(payload.categoryId),
       )
       createdUrl = buildUrl(category?.code, access.shortCode, true)
     }
@@ -302,6 +421,62 @@ async function submitEntity() {
     await loadEntities()
     await loadCategories()
     notifySuccess(isEditing ? 'Entidad actualizada.' : `Entidad creada: ${createdUrl}`)
+  })
+}
+
+function openClientDialog(client = null) {
+  clientDraft.value = client ? { ...client } : emptyClient()
+  clientDialog.value = true
+  clearMessages()
+}
+
+async function submitClient() {
+  if (isSaving.value) return
+  await runAction(async () => {
+    await saveClient(clientDraft.value)
+    clientDialog.value = false
+    await Promise.all([loadClients(), loadClientOptions()])
+    notifySuccess(clientDraft.value.id ? 'Cliente actualizado.' : 'Cliente creado.')
+  })
+}
+
+async function removeClient(client) {
+  if (!window.confirm(`¿Eliminar el cliente “${client.name}”?`)) return
+  await runAction(async () => {
+    await deleteClient(client.id)
+    await Promise.all([loadClients(), loadClientOptions()])
+    // Si se estaba filtrando por este cliente, el filtro apuntaría a un id que
+    // ya no existe y la lista de entidades saldría vacía sin explicación.
+    if (entityClienteId.value === client.id) {
+      entityClienteId.value = null
+      await loadEntities()
+    }
+    notifySuccess('Cliente eliminado.')
+  })
+}
+
+function openBulkDialog() {
+  bulkDraft.value = emptyBulk(activeCategories.value[0]?.id ?? categories.value[0]?.id ?? null)
+  bulkDialog.value = true
+  clearMessages()
+}
+
+async function submitBulk() {
+  if (isSaving.value) return
+  await runAction(async () => {
+    const clienteId = await resolveDraftClient(bulkDraft.value)
+    const result = await bulkCreateEntities({
+      categoryId: bulkDraft.value.categoryId,
+      clienteId,
+      prefix: bulkDraft.value.prefix,
+      from: bulkDraft.value.from,
+      to: bulkDraft.value.to,
+      pad: bulkDraft.value.pad,
+    })
+    bulkDialog.value = false
+    await loadEntities()
+    await loadCategories()
+    notifySuccess(`${result.created} fichas creadas: ${result.first} … ${result.last}`)
   })
 }
 
@@ -408,6 +583,7 @@ async function generateQrImage(entity) {
 }
 
 async function submitPasswordChange() {
+  if (isSaving.value) return
   const form = securityForm.value
   if (form.newPassword !== form.confirmPassword) {
     notifyError('La confirmación de la nueva contraseña no coincide.')
@@ -504,6 +680,10 @@ function emptySuggestion(categoryId = null, sortOrder = 10) {
   return { id: null, categoryId, name: '', active: true, sortOrder, dataType: 'text' }
 }
 
+function emptyClient() {
+  return { id: null, name: '', email: '', phone: '', active: true }
+}
+
 function emptyEntity(categoryId = null) {
   return {
     id: null,
@@ -511,9 +691,20 @@ function emptyEntity(categoryId = null) {
     categoryId,
     token: '',
     shortCode: '',
-    ownerName: '',
-    ownerEmail: '',
-    ownerPhone: '',
+    clienteId: null,
+    newClient: emptyClient(),
+  }
+}
+
+function emptyBulk(categoryId = null) {
+  return {
+    categoryId,
+    clienteId: null,
+    newClient: emptyClient(),
+    prefix: '',
+    from: 1,
+    to: 10,
+    pad: 3,
   }
 }
 
@@ -726,9 +917,14 @@ function emptyPagination() {
                 <h2>Entidades y URLs</h2>
                 <p>Cada entidad conserva un GUID interno y recibe una URL pública corta.</p>
               </div>
-              <v-btn :disabled="!categories.length" color="primary" variant="flat" @click="openEntityDialog()">
-                <Plus :size="19" /> Nueva entidad
-              </v-btn>
+              <div class="toolbar-actions">
+                <v-btn :disabled="!categories.length" variant="tonal" @click="openBulkDialog()">
+                  <Layers :size="19" /> Crear por rango
+                </v-btn>
+                <v-btn :disabled="!categories.length" color="primary" variant="flat" @click="openEntityDialog()">
+                  <Plus :size="19" /> Nueva entidad
+                </v-btn>
+              </div>
             </div>
             <form class="entity-filters" @submit.prevent="applyEntityFilters">
               <label class="filter-field">
@@ -740,9 +936,18 @@ function emptyPagination() {
                   </option>
                 </select>
               </label>
+              <label class="filter-field">
+                <span>Cliente</span>
+                <select v-model="entityClienteId">
+                  <option :value="null">Todos los clientes</option>
+                  <option v-for="client in clients" :key="client.id" :value="client.id">
+                    {{ client.name }}
+                  </option>
+                </select>
+              </label>
               <label class="filter-field search-field">
                 <span>Buscar</span>
-                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Identificación o código" /></div>
+                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Identificación, código o cliente" /></div>
               </label>
               <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Filtrar</v-btn>
             </form>
@@ -756,7 +961,8 @@ function emptyPagination() {
                   <div>
                     <strong>{{ entity.identification }}</strong>
                     <span>{{ entity.categoryName }} · {{ entity.categoryCode }}</span>
-                    <span>{{ entity.ownerEmail || 'Sin correo de acceso' }}</span>
+                    <span v-if="entity.clientName">{{ entity.clientName }} · {{ entity.clientEmail }}</span>
+                    <span v-else class="muted-note">Sin cliente asignado</span>
                   </div>
                 </div>
                 <div class="entity-url">
@@ -779,6 +985,60 @@ function emptyPagination() {
                 <button :disabled="entityPagination.page <= 1" type="button" aria-label="Página anterior" @click="changeEntityPage(entityPagination.page - 1)"><ChevronLeft :size="18" /></button>
                 <strong>{{ entityPagination.page }} / {{ entityPagination.totalPages }}</strong>
                 <button :disabled="entityPagination.page >= entityPagination.totalPages" type="button" aria-label="Página siguiente" @click="changeEntityPage(entityPagination.page + 1)"><ChevronRight :size="18" /></button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeView === 'clients'" class="view-section">
+            <div class="section-toolbar">
+              <div>
+                <h2>Clientes</h2>
+                <p>Un cliente agrupa sus fichas: una persona puede tener varias motos y varias mascotas.</p>
+              </div>
+              <v-btn color="primary" variant="flat" @click="openClientDialog()">
+                <Plus :size="19" /> Nuevo cliente
+              </v-btn>
+            </div>
+
+            <form class="entity-filters" @submit.prevent="applyClientFilters">
+              <label class="filter-field search-field">
+                <span>Buscar</span>
+                <div><Search :size="18" /><input v-model="clientSearch" maxlength="200" placeholder="Nombre, correo o celular" /></div>
+              </label>
+              <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Filtrar</v-btn>
+            </form>
+
+            <div class="data-table">
+              <div class="table-head client-grid">
+                <span>Cliente</span><span>Celular</span><span>Fichas</span><span>Estado</span><span />
+              </div>
+              <div v-if="isLoading" class="table-empty">Cargando clientes...</div>
+              <div v-else-if="!clientRows.length" class="table-empty">No hay clientes registrados.</div>
+              <div v-for="client in clientRows" :key="client.id" class="table-row client-grid">
+                <div class="primary-cell">
+                  <span class="cell-icon"><Contact :size="18" /></span>
+                  <div>
+                    <strong>{{ client.name }}</strong>
+                    <small>{{ client.email }}</small>
+                  </div>
+                </div>
+                <span>{{ client.phone || '—' }}</span>
+                <span>{{ client.entityCount }} {{ client.entityCount === 1 ? 'ficha' : 'fichas' }}</span>
+                <span class="status-pill" :class="{ 'status-pill--off': !client.active }">
+                  {{ client.active ? 'Activo' : 'Inactivo' }}
+                </span>
+                <div class="action-cell">
+                  <button type="button" title="Editar" @click="openClientDialog(client)"><Pencil :size="18" /></button>
+                  <button type="button" class="danger" title="Eliminar" @click="removeClient(client)"><Trash2 :size="18" /></button>
+                </div>
+              </div>
+            </div>
+            <div v-if="clientPagination.total > clientPagination.pageSize" class="pagination-bar">
+              <span>{{ clientPagination.total }} clientes</span>
+              <div>
+                <button :disabled="clientPagination.page <= 1" type="button" aria-label="Página anterior" @click="changeClientPage(clientPagination.page - 1)"><ChevronLeft :size="18" /></button>
+                <strong>{{ clientPagination.page }} / {{ clientPagination.totalPages }}</strong>
+                <button :disabled="clientPagination.page >= clientPagination.totalPages" type="button" aria-label="Página siguiente" @click="changeClientPage(clientPagination.page + 1)"><ChevronRight :size="18" /></button>
               </div>
             </div>
           </div>
@@ -836,13 +1096,75 @@ function emptyPagination() {
         <form @submit.prevent="submitEntity">
           <label class="field"><span>Identificación</span><input v-model="entityDraft.identification" :maxlength="IDENTIFICATION_MAX_LENGTH" placeholder="Ej. ABC-123" /></label>
           <label class="field"><span>Categoría</span><select v-model="entityDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
-          <label class="field"><span>Nombre del propietario <small>Opcional</small></span><input v-model="entityDraft.ownerName" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
-          <label class="field"><span>Correo de acceso <small>Opcional</small></span><input v-model="entityDraft.ownerEmail" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
-          <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="entityDraft.ownerPhone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
-          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso a modificaciones</strong><span>{{ entityDraft.ownerEmail ? 'El correo recibirá el código para ver datos protegidos y realizar cambios.' : 'Sin correo, la ficha pública permanecerá en modo solo lectura.' }}</span></p></div>
+          <label class="field">
+            <span>Cliente <small>Opcional</small></span>
+            <select v-model="entityDraft.clienteId">
+              <option :value="null">Sin cliente (solo lectura)</option>
+              <option v-for="client in clients" :key="client.id" :value="client.id">{{ client.name }} · {{ client.email }}</option>
+              <option value="new">＋ Nuevo cliente…</option>
+            </select>
+          </label>
+          <template v-if="entityDraft.clienteId === 'new'">
+            <label class="field"><span>Nombre del cliente</span><input v-model="entityDraft.newClient.name" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
+            <label class="field"><span>Correo de acceso</span><input v-model="entityDraft.newClient.email" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
+            <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="entityDraft.newClient.phone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
+          </template>
+          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso a modificaciones</strong><span>{{ entityDraft.clienteId ? 'El cliente recibe el código para ver datos protegidos y administrar todas sus fichas.' : 'Sin cliente, la ficha pública permanecerá en modo solo lectura.' }}</span></p></div>
           <div v-if="!entityDraft.id" class="guid-preview"><KeyRound :size="19" /><p><strong>Acceso seguro automático</strong><span>Se generará un GUID interno y un código corto para la URL.</span></p></div>
           <div v-else class="url-preview"><span>URL actual</span><code>{{ buildUrl(categories.find((item) => item.id === Number(entityDraft.categoryId))?.code, entityDraft.shortCode || entityDraft.token, Boolean(entityDraft.shortCode)) }}</code></div>
           <div class="dialog-actions"><v-btn variant="text" @click="entityDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
+        </form>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="clientDialog" max-width="520">
+      <v-card class="admin-dialog">
+        <div class="dialog-header"><div><Contact :size="21" /><h2>{{ clientDraft.id ? 'Editar cliente' : 'Nuevo cliente' }}</h2></div><button type="button" @click="clientDialog = false"><X :size="21" /></button></div>
+        <form @submit.prevent="submitClient">
+          <label class="field"><span>Nombre</span><input v-model="clientDraft.name" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
+          <label class="field"><span>Correo de acceso</span><input v-model="clientDraft.email" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
+          <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="clientDraft.phone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
+          <label class="switch-field"><input v-model="clientDraft.active" type="checkbox" /><span><strong>Cliente activo</strong><small>Si lo desactivas, sus fichas quedan en solo lectura sin borrar nada.</small></span></label>
+          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso del cliente</strong><span>Con este correo administra todas sus fichas. Cambiarlo cierra sus sesiones abiertas.</span></p></div>
+          <div class="dialog-actions"><v-btn variant="text" @click="clientDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
+        </form>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="bulkDialog" max-width="620">
+      <v-card class="admin-dialog">
+        <div class="dialog-header"><div><Layers :size="21" /><h2>Crear fichas por rango</h2></div><button type="button" @click="bulkDialog = false"><X :size="21" /></button></div>
+        <form @submit.prevent="submitBulk">
+          <p class="dialog-hint">Pensado para lotes: 100 vacas, 40 motos. Cada ficha recibe su propio código corto y su QR.</p>
+          <label class="field"><span>Categoría</span><select v-model="bulkDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
+          <label class="field">
+            <span>Cliente <small>Opcional</small></span>
+            <select v-model="bulkDraft.clienteId">
+              <option :value="null">Sin cliente (solo lectura)</option>
+              <option v-for="client in clients" :key="client.id" :value="client.id">{{ client.name }} · {{ client.email }}</option>
+              <option value="new">＋ Nuevo cliente…</option>
+            </select>
+          </label>
+          <template v-if="bulkDraft.clienteId === 'new'">
+            <label class="field"><span>Nombre del cliente</span><input v-model="bulkDraft.newClient.name" maxlength="100" placeholder="Ej. Finca El Paraíso" /></label>
+            <label class="field"><span>Correo de acceso</span><input v-model="bulkDraft.newClient.email" maxlength="254" type="email" placeholder="finca@correo.com" /></label>
+            <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="bulkDraft.newClient.phone" maxlength="30" type="tel" placeholder="Ej. +57 300 000 0000" /></label>
+          </template>
+          <label class="field"><span>Prefijo</span><input v-model="bulkDraft.prefix" maxlength="150" placeholder="Ej. VACA-" /></label>
+          <div class="range-row">
+            <label class="field"><span>Desde</span><input v-model.number="bulkDraft.from" min="0" type="number" /></label>
+            <label class="field"><span>Hasta</span><input v-model.number="bulkDraft.to" min="0" type="number" /></label>
+            <label class="field"><span>Relleno</span><input v-model.number="bulkDraft.pad" min="1" max="10" type="number" /></label>
+          </div>
+          <div class="guid-preview">
+            <Layers :size="19" />
+            <p v-if="bulkPreview.valid">
+              <strong>{{ bulkPreview.count }} fichas</strong>
+              <span>Desde {{ bulkPreview.first }} hasta {{ bulkPreview.last }}. Se genera un código corto y un QR por ficha.</span>
+            </p>
+            <p v-else><strong>Revisa el rango</strong><span>El prefijo es obligatorio y el final debe ser mayor o igual que el inicio.</span></p>
+          </div>
+          <div class="dialog-actions"><v-btn variant="text" @click="bulkDialog = false">Cancelar</v-btn><v-btn color="primary" :disabled="!bulkPreview.valid" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Crear fichas</v-btn></div>
         </form>
       </v-card>
     </v-dialog>
@@ -1045,8 +1367,11 @@ button { letter-spacing: 0; }
 .table-row:last-child { border-bottom: 0; }
 .category-grid { grid-template-columns: minmax(170px, 1.2fr) minmax(90px, .55fr) minmax(180px, 1fr) 90px 88px; }
 .suggestion-grid { grid-template-columns: minmax(210px, 1fr) 150px 80px 100px 88px; }
+.client-grid { grid-template-columns: minmax(220px, 1.4fr) minmax(120px, .7fr) 90px 90px 88px; }
 .primary-cell { display: flex; align-items: center; gap: 10px; min-width: 0; color: #172033; }
+.primary-cell > div { display: grid; gap: 2px; min-width: 0; }
 .primary-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.primary-cell small, .muted-note { overflow: hidden; color: #748298; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
 .cell-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; color: #0873ff; background: #edf6ff; border-radius: 6px; }
 .table-row code { width: fit-content; padding: 4px 7px; color: #264b7c; background: #eef4fa; border-radius: 4px; }
 .status-pill { width: fit-content; padding: 5px 8px; color: #157255; font-size: .78rem; font-weight: 750; background: #e7f7f0; border-radius: 999px; }
@@ -1062,11 +1387,15 @@ button { letter-spacing: 0; }
 .pagination-bar button:disabled { color: #a8b3c2; background: #f2f5f8; cursor: default; }
 .pagination-bar strong { min-width: 54px; color: #34445e; text-align: center; }
 .filter-field { display: grid; gap: 6px; width: min(100%, 340px); margin-bottom: 18px; color: #4b5b72; font-size: .82rem; font-weight: 750; }
-.entity-filters { display: grid; grid-template-columns: 240px minmax(240px, 1fr) auto; gap: 12px; align-items: end; margin-bottom: 18px; padding: 15px; background: #fff; border: 1px solid #dce5ef; border-radius: 7px; }
+.entity-filters { display: grid; grid-template-columns: 190px 220px minmax(200px, 1fr) auto; gap: 12px; align-items: end; margin-bottom: 18px; padding: 15px; background: #fff; border: 1px solid #dce5ef; border-radius: 7px; }
 .entity-filters .filter-field { width: 100%; margin: 0; }
 .search-field > div { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 11px; background: #fff; border: 1px solid #cdd9e7; border-radius: 6px; }
 .search-field input { width: 100%; min-width: 0; border: 0; outline: 0; }
 .filter-button { min-height: 44px; }
+.toolbar-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.range-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.range-row .field { margin: 0; }
+.dialog-hint { margin: 0 0 4px; color: #62748e; font-size: .88rem; }
 .entity-row { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(300px, 1.4fr) auto; gap: 20px; align-items: center; min-height: 86px; padding: 12px 18px; border-bottom: 1px solid #e5ebf2; }
 .entity-row:last-child { border-bottom: 0; }
 .entity-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -1142,7 +1471,7 @@ button { letter-spacing: 0; }
   .print-actions { display: grid; }
   .section-toolbar { flex-direction: column; align-items: stretch; gap: 14px; }
   .section-toolbar :deep(.v-btn) { width: 100%; min-width: 42px; padding: 0 12px; }
-  .category-grid, .suggestion-grid { grid-template-columns: 1fr auto; }
+  .category-grid, .suggestion-grid, .client-grid { grid-template-columns: 1fr auto; }
   .table-head span:nth-child(n+2):not(:last-child) { display: none; }
   .table-row { min-height: 72px; padding: 12px; }
   .table-row.category-grid, .table-row.suggestion-grid { align-items: start; gap: 6px 12px; }
@@ -1155,6 +1484,14 @@ button { letter-spacing: 0; }
   .table-row.suggestion-grid > :nth-child(3) { display: block; grid-column: 1; grid-row: 3; margin-left: 44px; color: #748298; font-size: .82rem; }
   .table-row.suggestion-grid > :nth-child(3)::before { content: "Orden: "; }
   .table-row.suggestion-grid > :nth-child(4) { display: block; grid-column: 1; grid-row: 4; margin: 2px 0 0 44px; }
+  .table-row.client-grid { align-items: start; gap: 6px 12px; }
+  .table-row.client-grid > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .table-row.client-grid > :nth-child(2) { display: block; grid-column: 1; grid-row: 2; margin-left: 44px; color: #748298; font-size: .82rem; }
+  .table-row.client-grid > :nth-child(3) { display: block; grid-column: 1; grid-row: 3; margin-left: 44px; color: #748298; font-size: .82rem; }
+  .table-row.client-grid > :nth-child(4) { display: block; grid-column: 1; grid-row: 4; margin: 2px 0 0 44px; }
+  .table-row.client-grid > :nth-child(5) { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
+  .toolbar-actions { flex-direction: column; }
+  .range-row { grid-template-columns: 1fr; }
   .entity-filters { grid-template-columns: 1fr; }
   .filter-button { width: 100%; }
   .entity-row { grid-template-columns: 1fr; gap: 11px; }

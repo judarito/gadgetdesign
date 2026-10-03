@@ -2,9 +2,31 @@ import { purgeCache } from '@netlify/functions'
 
 const PUBLIC_CACHE_SECONDS = 60
 const ENTITY_SESSION_COOKIE = 'gd_entity_session'
-const CACHEABLE_CONTEXT_VARY = `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}`
+const CLIENT_SESSION_COOKIE = 'gd_client_session'
+// Las dos sesiones cambian la respuesta: sin la del cliente en la variación,
+// quien entra desde el portal recibiría la lectura anónima cacheada y vería sus
+// datos protegidos enmascarados.
+const CACHEABLE_CONTEXT_VARY =
+  `query=action|categoryCode|token,cookie=${ENTITY_SESSION_COOKIE}|${CLIENT_SESSION_COOKIE}`
+
+/**
+ * La caché de CDN solo es segura si podemos invalidarla.
+ *
+ * `purgeCache()` exige `NETLIFY_PURGE_API_TOKEN` en el entorno y lanza si no
+ * está. Sin él, la purga falla en silencio (se registra y se sigue), así que
+ * cada escritura dejaba la lectura pública con datos viejos hasta que expiraba
+ * el TTL: hasta 60 segundos viendo una ficha ya borrada o un dato ya editado.
+ *
+ * Mientras el token no esté configurado se responde `no-store`: se pierde algo
+ * de caché y se gana que lo que se lee sea lo que hay.
+ */
+function canPurgeCache() {
+  return Boolean(process.env.NETLIFY_PURGE_API_TOKEN)
+}
 
 export function publicEntityCacheHeaders(entityId, categoryId) {
+  if (!canPurgeCache()) return privateEntityCacheHeaders()
+
   return {
     'cache-control': 'no-store',
     'netlify-cdn-cache-control': `public, durable, s-maxage=${PUBLIC_CACHE_SECONDS}`,
@@ -23,6 +45,12 @@ export function privateEntityCacheHeaders() {
 
 export async function purgeEntityCache(entityId) {
   await purgeTags([entityCacheTag(entityId)])
+}
+
+/** Purga varias fichas de una vez: al cambiar un cliente cambian todas las suyas. */
+export async function purgeEntityCaches(entityIds) {
+  const ids = [...new Set(entityIds.map((id) => positiveId(id)))]
+  if (ids.length) await purgeTags(ids.map(entityCacheTag))
 }
 
 export async function purgeCategoryCache(categoryId) {
@@ -44,16 +72,29 @@ function positiveId(value) {
 }
 
 async function purgeTags(tags) {
-  if (!isDeployedNetlifyContext()) return
+  if (!hasCdnCache()) return
 
   try {
     await purgeCache({ tags })
   } catch (error) {
-    // La escritura ya fue confirmada en Turso. El TTL limita una purga fallida a 60 segundos.
+    // La escritura ya fue confirmada en Turso. Mientras la purga falle, el TTL
+    // es lo único que impide servir la versión vieja.
     console.error(`No fue posible invalidar las etiquetas de caché: ${tags.join(', ')}`, error)
   }
 }
 
-function isDeployedNetlifyContext() {
-  return ['production', 'deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT)
+/**
+ * ¿Hay un CDN que invalidar?
+ *
+ * Antes esto miraba `process.env.CONTEXT`, que en este runtime de Functions no
+ * existe: la comprobación era siempre falsa, así que la purga no se ejecutaba
+ * nunca —ni en producción— y cada escritura dejaba la lectura pública con datos
+ * viejos hasta que expiraba el TTL de 60 segundos.
+ *
+ * En la práctica quien decide es el token, que sí está en el runtime desplegado
+ * y no en el `.env` local. `NETLIFY_LOCAL` se mantiene como salvaguarda para
+ * entornos que sí la definan; este CLI no lo hace.
+ */
+function hasCdnCache() {
+  return !process.env.NETLIFY_LOCAL && canPurgeCache()
 }

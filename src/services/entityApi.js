@@ -1,9 +1,18 @@
 import { apiRequest } from './apiClient'
+import { isReservedPath } from './routes'
 
-export const CUSTOM_DATA_LIMIT = 10
+export { CUSTOM_DATA_LIMIT } from './customData'
+
+const INVALID_ROUTE = { categoryCode: null, token: null, isShortRoute: false, isValid: false }
 
 export function getRouteContext(pathname = window.location.pathname) {
   const segments = pathname.split('/').filter(Boolean)
+
+  // Más de dos segmentos no es una ruta de ficha, y los nombres reservados
+  // (/admin, /portal y lo que venga) nunca se resuelven como fichas.
+  if (segments.length > 2) return INVALID_ROUTE
+  if (segments.some((segment) => isReservedPath(segment))) return INVALID_ROUTE
+
   const isShortRoute = segments.length === 1
   const [categoryCode, token] = isShortRoute
     ? [null, segments[0]]
@@ -13,7 +22,7 @@ export function getRouteContext(pathname = window.location.pathname) {
     categoryCode,
     token,
     isShortRoute,
-    isValid: Boolean(token && (isShortRoute || categoryCode) && segments.length <= 2),
+    isValid: Boolean(token && (isShortRoute || categoryCode)),
   }
 }
 

@@ -57,6 +57,25 @@ RESEND_FROM
 No configures `LOCAL_TURSO_URL` en producción. Las variables privadas no se
 incluyen en el bundle del navegador.
 
+### Caché de las lecturas públicas
+
+La lectura anónima de una ficha se puede cachear 60 s en el CDN, y esa caché
+solo se activa si el entorno tiene `NETLIFY_PURGE_API_TOKEN`, que es lo que
+permite invalidarla al escribir:
+
+- **Con token** (el runtime desplegado lo tiene): la lectura pública se sirve de
+  caché y se purga por etiquetas en cada edición, cambio de cliente o borrado.
+- **Sin token** (tu equipo en local): la lectura responde `no-store`, siempre
+  fresca.
+
+En local no configures ese token: haría que las Functions intentaran purgar la
+caché del sitio al que está vinculado el repositorio, que es el de producción.
+
+El condicional existe por un motivo: durante un tiempo la purga no se ejecutaba
+—el guardia consultaba `CONTEXT`, que no existe en este runtime— y cada escritura
+dejaba la página pública mostrando datos viejos hasta que expiraba el TTL, hasta
+60 segundos viendo una ficha ya borrada. Ante la duda, mejor no cachear.
+
 ### Entorno de pruebas (rama `dev`)
 
 El sitio `gadgetdesign-dev` usa una base de datos Turso propia y secretos
@@ -93,6 +112,38 @@ Ejecútala de forma controlada antes de desplegar cambios de esquema. Para
 apuntarla a la base de pruebas, exporta antes `.env.dev.local` como se explica
 en [Entorno de pruebas](#entorno-de-pruebas-rama-dev).
 
+### Retirar las columnas heredadas del propietario
+
+El dueño de una ficha vive ahora en `Clientes`. Las columnas
+`Entidades.owner_name`, `owner_email` y `owner_phone` quedaron como residuo y se
+eliminan con un comando aparte, porque es destructivo y solo tiene sentido
+cuando ya corre el código que lee el dueño en `Clientes`:
+
+```sh
+npm run setup:admin          # aditivo: crea Clientes y vincula las fichas
+npm run setup:drop-legacy    # destructivo: elimina las columnas heredadas
+```
+
+El orden importa, y el script se protege solo: se niega a borrar si encuentra
+una ficha con correo heredado y sin cliente vinculado, y recrea antes los
+triggers porque SQLite bloquea `DROP COLUMN` si algún trigger nombra la columna.
+
+Los dos comandos imprimen al empezar la base de datos contra la que van. Además,
+`setup:drop-legacy` se niega a ejecutarse si el destino no parece de pruebas —una
+URL `file:` o un host que contenga `-dev`— salvo que lo confirmes a propósito:
+
+```sh
+CONFIRM_DESTRUCTIVE=si npm run setup:drop-legacy
+```
+
+La diferencia es entre acordarte de exportar `.env.dev.local` y que el script lo
+compruebe por ti. Un despiste ahí borraría las columnas que el código todavía en
+producción lee.
+
+En un despliegue, la secuencia segura es: `setup:admin` antes de fusionar el PR,
+y `setup:drop-legacy` (con la confirmación) después de que el código nuevo esté
+desplegado.
+
 ## URL de uso
 
 La URL pública usa el código corto de la entidad:
@@ -118,8 +169,24 @@ falsificar sesiones ni descifrar datos de producción.
 
 El sitio de pruebas es público y no tiene protección por contraseña, por eso
 trabaja contra su propia base de datos. El OTP se imprime en los logs de las
-Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo; se leen
-en Netlify → Logs → Functions.
+Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo.
+
+Para leerlo sin abrir el panel de Netlify, la CLI sirve, pero hay que apuntarla al
+sitio de pruebas: el repositorio está vinculado al de producción
+(`.netlify/state.json`), así que **cualquier comando de Netlify lanzado desde la
+raíz apunta a producción**. Desde un directorio vinculado a `gadgetdesign-dev`:
+
+```sh
+netlify logs --function client --since 5m
+```
+
+La ingesta tarda unos 20 segundos, así que si acabas de pedir el código espera un
+poco o usa `--follow`.
+
+Aviso: la canalización de logs de Netlify **pierde alguna línea**. Se ha observado
+un código creado en la base cuyo aviso nunca apareció, con tres vecinos sí
+publicados. Si pides un código y no lo ves, vuelve a pedirlo en lugar de dar por
+hecho que el envío falló.
 
 Los *deploy previews* de pull request están **desactivados en el sitio de
 producción** (`build_settings.skip_prs`): así el código de una rama sin fusionar

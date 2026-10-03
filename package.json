@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "setup:local": "node scripts/setupLocal.mjs",
     "test:functions": "npm run setup:local && node scripts/testFunctions.mjs",
-    "setup:admin": "node scripts/setupAdmin.mjs"
+    "setup:admin": "node scripts/setupAdmin.mjs",
+    "setup:drop-legacy": "node scripts/dropLegacyOwnerColumns.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

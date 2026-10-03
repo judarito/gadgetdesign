@@ -14,6 +14,16 @@ await db.batch([
     active NUMERIC NOT NULL DEFAULT 1,
     code TEXT(20) UNIQUE NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS Clientes (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    phone TEXT,
+    active NUMERIC NOT NULL DEFAULT 1,
+    auth_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   `CREATE TABLE IF NOT EXISTS Entidades (
     id INTEGER PRIMARY KEY,
     Identificacion TEXT(200) NOT NULL,
@@ -21,11 +31,20 @@ await db.batch([
     categoriaID INTEGER NOT NULL,
     custom_data TEXT NOT NULL DEFAULT '[]',
     short_code TEXT UNIQUE,
-    owner_name TEXT,
-    owner_email TEXT,
-    owner_phone TEXT,
     auth_version INTEGER NOT NULL DEFAULT 1,
+    clienteID INTEGER REFERENCES Clientes (id),
     FOREIGN KEY (categoriaID) REFERENCES Categorias (id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ClientAccessCodes (
+    id INTEGER PRIMARY KEY,
+    cliente_id INTEGER NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    consumed NUMERIC NOT NULL DEFAULT 0,
+    request_ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (cliente_id) REFERENCES Clientes (id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS CategoriaSugerencias (
     id INTEGER PRIMARY KEY,
@@ -70,6 +89,39 @@ await db.batch([
   )`,
   'CREATE INDEX IF NOT EXISTS idx_admin_login_attempts_ip_time ON AdminLoginAttempts (request_ip, created_at)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_token ON Entidades (token)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_normalized ON Clientes (LOWER(TRIM(email)))',
+  'CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)',
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_lookup ON ClientAccessCodes (cliente_id, created_at)',
+  `CREATE TABLE IF NOT EXISTS ClientOtpRequests (
+    id INTEGER PRIMARY KEY,
+    request_ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
+], 'write')
+
+// La base local puede venir de una versión anterior sin la columna.
+const localEntityColumns = await db.execute('PRAGMA table_info(Entidades)')
+if (!localEntityColumns.rows.some((column) => column.name === 'clienteID')) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN clienteID INTEGER REFERENCES Clientes (id)')
+}
+
+// La base local es un entorno de pruebas desechable, así que se vacía antes de
+// sembrar los datos: el resultado debe ser siempre el mismo para que la suite
+// de integración pueda ejecutarse dos veces seguidas sin chocar con lo que
+// dejó la ejecución anterior.
+await db.batch([
+  'DELETE FROM EntityAccessCodes',
+  'DELETE FROM ClientAccessCodes',
+  'DELETE FROM ClientOtpRequests',
+  'DELETE FROM EntityAliases',
+  'DELETE FROM Entidades',
+  'DELETE FROM CategoriaSugerencias',
+  'DELETE FROM Clientes',
+  'DELETE FROM Categorias',
+  'DELETE FROM AdminLoginAttempts',
 ], 'write')
 
 await db.execute(`INSERT OR IGNORE INTO Categorias (id, name, active, code)
@@ -83,33 +135,47 @@ await db.batch([
           VALUES (3, 1, 'Día Pico y placa', 1, 30, 'text')`, args: [] },
 ], 'write')
 
+// Cliente de prueba: es el dueño de la ficha local.
+await db.execute(`INSERT INTO Clientes (id, name, email, phone, active, auth_version)
+                  VALUES (1, 'Cliente Local', 'cliente@example.com', '+57 300 000 0000', 1, 1)
+                  ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    email = excluded.email,
+                    phone = excluded.phone,
+                    active = excluded.active`)
+
 const sampleData = JSON.stringify([
   { id: 'local-public', key: 'Color', value: 'Azul', dataType: 'text', protected: false },
   { id: 'local-protected', key: 'Número de póliza', value: 'POL-123456', dataType: 'text', protected: true },
 ])
 await db.execute({
   sql: `INSERT INTO Entidades
-        (id, Identificacion, token, categoriaID, custom_data, short_code,
-         owner_name, owner_email, owner_phone, auth_version)
+        (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version, clienteID)
         VALUES (1, 'LOCAL-001', '11111111-1111-4111-8111-111111111111', 1, ?,
-                'Local001', 'Cliente Local', 'cliente@example.com', '+57 300 000 0000', 1)
+                'Local001', 1, 1)
         ON CONFLICT(id) DO UPDATE SET
           Identificacion = excluded.Identificacion,
           token = excluded.token,
           categoriaID = excluded.categoriaID,
           custom_data = excluded.custom_data,
           short_code = excluded.short_code,
-          owner_name = excluded.owner_name,
-          owner_email = excluded.owner_email,
-          owner_phone = excluded.owner_phone,
-          auth_version = excluded.auth_version`,
+          auth_version = excluded.auth_version,
+          clienteID = excluded.clienteID`,
   args: [sampleData],
 })
 
-await db.execute('DELETE FROM EntityAccessCodes')
-await db.execute('DELETE FROM AdminLoginAttempts')
-
 await applyDataIntegrityConstraints(db)
+
+// La base local puede venir de antes con las columnas heredadas. Se eliminan
+// aquí para que el entorno de pruebas refleje el esquema objetivo: si el código
+// volviera a necesitarlas, las pruebas fallarían.
+const legacyColumns = ['owner_name', 'owner_email', 'owner_phone']
+for (const name of legacyColumns) {
+  const info = await db.execute('PRAGMA table_info(Entidades)')
+  if (info.rows.some((column) => column.name === name)) {
+    await db.execute(`ALTER TABLE Entidades DROP COLUMN ${name}`)
+  }
+}
 
 const credential = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1')
 if (!credential.rows.length) {

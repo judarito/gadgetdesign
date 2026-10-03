@@ -8,6 +8,7 @@ import {
 import {
   HttpError,
   clearCookie,
+  getClientIp,
   getCookie,
   handleError,
   json,
@@ -15,27 +16,32 @@ import {
   sessionCookie,
 } from './_lib/http.mjs'
 import {
+  CLIENT_COOKIE,
   ENTITY_COOKIE,
   ENTITY_SESSION_SECONDS,
   OTP_SECONDS,
   decryptValue,
   encryptValue,
+  entityAccessScope,
   generateOtp,
-  getEntitySession,
   hashOtp,
   maskEmail,
+  requireEntityAccess,
   requireEntitySession,
   safeEqualHex,
   signSession,
 } from './_lib/security.mjs'
-import { createCustomDataItem, parseCustomData, serializeCustomData } from '../../src/services/customData.js'
+import {
+  CUSTOM_DATA_LIMIT,
+  createCustomDataItem,
+  parseCustomData,
+  serializeCustomData,
+} from '../../src/services/customData.js'
 import {
   sanitizeCustomDataInput,
   validateCategoryCode,
   validateEntityToken,
 } from '../../src/services/validation.js'
-
-const CUSTOM_DATA_LIMIT = 10
 
 export default async function handler(request) {
   try {
@@ -44,7 +50,7 @@ export default async function handler(request) {
 
     if (request.method === 'GET' && action === 'context') {
       const context = await getContext(request, routeInput(url.searchParams))
-      const isAnonymous = !getCookie(request, ENTITY_COOKIE)
+      const isAnonymous = !getCookie(request, ENTITY_COOKIE) && !getCookie(request, CLIENT_COOKIE)
       const cacheHeaders = isAnonymous && context.entity
         ? publicEntityCacheHeaders(context.entity.id, context.category.id)
         : privateEntityCacheHeaders()
@@ -57,7 +63,9 @@ export default async function handler(request) {
       return await verifyCode(request, await readJson(request))
     }
     if (request.method === 'POST' && action === 'logout') {
-      return json({ ok: true }, 200, { 'set-cookie': clearCookie(ENTITY_COOKIE) })
+      return json({ ok: true }, 200, {
+        'set-cookie': [clearCookie(ENTITY_COOKIE, request), clearCookie(CLIENT_COOKIE, request)],
+      })
     }
     if (request.method === 'POST' && action === 'create-data') {
       return await mutateData(request, await readJson(request), 'create')
@@ -87,15 +95,13 @@ function routeInput(source) {
 
 async function getContext(request, route, forceAuthorized = false) {
   const db = getDb()
-  const { entity, category } = await findEntity(db, route)
+  const { entity, category, cliente } = await findEntity(db, route)
   if (!entity || !category) return { category: null, entity: null, suggestions: [], auth: emptyAuth() }
 
-  const session = getEntitySession(request)
-  const authorized = forceAuthorized || Boolean(
-    session &&
-    Number(session.entityId) === Number(entity.id) &&
-    Number(session.authVersion) === Number(entity.authVersion),
-  )
+  // El alcance viaja al cliente: la pagina de la ficha borra la ficha entera
+  // solo si la sesion es la de esa ficha, no la del portal.
+  const scope = forceAuthorized ? 'entity' : entityAccessScope(request, entity, cliente)
+  const authorized = Boolean(scope)
   const suggestionsResult = await db.execute({
     sql: `SELECT id, name, data_type
           FROM CategoriaSugerencias
@@ -120,17 +126,20 @@ async function getContext(request, route, forceAuthorized = false) {
     })),
     auth: {
       authorized,
-      canRequestCode: Boolean(entity.ownerEmail),
-      emailHint: maskEmail(entity.ownerEmail),
+      scope,
+      canRequestCode: Boolean(cliente?.email && cliente.active),
+      // El correo enmascarado del dueño no se publica si el cliente está
+      // desactivado: la ficha queda en solo lectura y la pista no aporta nada.
+      emailHint: cliente?.active ? maskEmail(cliente.email) : '',
     },
   }
 }
 
 async function requestCode(request, payload) {
   const db = getDb()
-  const { entity } = await findEntity(db, payload)
+  const { entity, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
-  if (!entity.ownerEmail) {
+  if (!cliente?.email || !cliente.active) {
     throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
   }
 
@@ -156,11 +165,11 @@ async function requestCode(request, payload) {
     sql: `INSERT INTO EntityAccessCodes
           (entity_id, code_hash, expires_at, attempts, consumed, request_ip, created_at)
           VALUES (?, ?, ?, 0, 0, ?, ?)`,
-    args: [entity.id, hashOtp(entity.id, code), now + OTP_SECONDS, ip, now],
+    args: [entity.id, hashOtp('entity', entity.id, code), now + OTP_SECONDS, ip, now],
   })
   try {
     await sendAccessCode({
-      to: entity.ownerEmail,
+      to: cliente.email,
       code,
       identification: entity.identificacion,
     })
@@ -174,13 +183,16 @@ async function requestCode(request, payload) {
     throw error
   }
 
-  return json({ ok: true, emailHint: maskEmail(entity.ownerEmail) })
+  return json({ ok: true, emailHint: maskEmail(cliente.email) })
 }
 
 async function verifyCode(request, payload) {
   const db = getDb()
-  const { entity } = await findEntity(db, payload)
+  const { entity, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
+  if (!cliente?.email || !cliente.active) {
+    throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
+  }
   const code = String(payload.code || '').trim()
   if (!/^\d{6}$/.test(code)) throw new HttpError(400, 'Escribe el código de seis dígitos.')
 
@@ -198,7 +210,7 @@ async function verifyCode(request, payload) {
     throw new HttpError(429, 'El código fue bloqueado por demasiados intentos.')
   }
 
-  if (!safeEqualHex(String(accessCode.code_hash), hashOtp(entity.id, code))) {
+  if (!safeEqualHex(String(accessCode.code_hash), hashOtp('entity', entity.id, code))) {
     await db.execute({
       sql: 'UPDATE EntityAccessCodes SET attempts = attempts + 1 WHERE id = ?',
       args: [accessCode.id],
@@ -206,25 +218,33 @@ async function verifyCode(request, payload) {
     throw new HttpError(400, 'El código no es correcto.')
   }
 
-  await db.execute({ sql: 'UPDATE EntityAccessCodes SET consumed = 1 WHERE id = ?', args: [accessCode.id] })
+  // Consumo atómico: evita que dos peticiones simultáneas con el mismo código
+  // emitan dos sesiones.
+  const claimed = await db.execute({
+    sql: 'UPDATE EntityAccessCodes SET consumed = 1 WHERE id = ? AND consumed = 0',
+    args: [accessCode.id],
+  })
+  if (!Number(claimed.rowsAffected)) throw new HttpError(400, 'El código venció. Solicita uno nuevo.')
+
   const token = signSession({
     type: 'entity',
     entityId: Number(entity.id),
-    authVersion: Number(entity.authVersion),
+    clienteId: Number(cliente.id),
+    ver: Number(cliente.authVersion),
   }, ENTITY_SESSION_SECONDS)
 
   return json(
     await getContext(request, payload, true),
     200,
-    { 'set-cookie': sessionCookie(ENTITY_COOKIE, token, ENTITY_SESSION_SECONDS) },
+    { 'set-cookie': sessionCookie(ENTITY_COOKIE, token, ENTITY_SESSION_SECONDS, request) },
   )
 }
 
 async function mutateData(request, payload, operation) {
   const db = getDb()
-  const { entity } = await findEntity(db, payload)
+  const { entity, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
-  requireEntitySession(request, entity)
+  requireEntityAccess(request, entity, cliente)
 
   let customData = entity.customData
   if (operation === 'create') {
@@ -260,9 +280,9 @@ async function mutateData(request, payload, operation) {
 
 async function deleteCurrentEntity(request, payload) {
   const db = getDb()
-  const { entity } = await findEntity(db, payload)
+  const { entity, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
-  requireEntitySession(request, entity)
+  requireEntitySession(request, entity, cliente)
 
   const confirmation = String(payload.confirmation || '').trim()
   if (confirmation !== entity.identificacion.trim()) {
@@ -279,7 +299,7 @@ async function deleteCurrentEntity(request, payload) {
   return json(
     { ok: true },
     200,
-    { 'set-cookie': clearCookie(ENTITY_COOKIE) },
+    { 'set-cookie': [clearCookie(ENTITY_COOKIE, request), clearCookie(CLIENT_COOKIE, request)] },
   )
 }
 
@@ -325,12 +345,16 @@ async function findEntity(db, route) {
     : [safeToken, safeToken, safeToken]
   const result = await db.execute({
     sql: `SELECT DISTINCT e.id, e.Identificacion AS identificacion, e.token,
-                 e.short_code, e.categoriaID, e.custom_data, e.owner_name,
-                 e.owner_email, e.owner_phone, e.auth_version,
+                 e.short_code, e.categoriaID, e.custom_data,
+                 e.auth_version, e.clienteID,
                  c.id AS category_id, c.name AS category_name,
-                 c.active AS category_active, c.code AS category_code
+                 c.active AS category_active, c.code AS category_code,
+                 cl.id AS client_id, cl.name AS client_name,
+                 cl.email AS client_email, cl.phone AS client_phone,
+                 cl.active AS client_active, cl.auth_version AS client_auth_version
           FROM Entidades e
           INNER JOIN Categorias c ON c.id = e.categoriaID
+          LEFT JOIN Clientes cl ON cl.id = e.clienteID
           LEFT JOIN EntityAliases a ON a.entity_id = e.id
           WHERE (e.short_code = ? OR e.token = ? OR a.code = ?)
           ${categoryFilter}
@@ -338,7 +362,7 @@ async function findEntity(db, route) {
     args,
   })
   const row = result.rows[0]
-  if (!row) return { entity: null, category: null }
+  if (!row) return { entity: null, category: null, cliente: null }
 
   return {
     entity: {
@@ -348,9 +372,6 @@ async function findEntity(db, route) {
       shortCode: String(row.short_code || ''),
       categoriaID: Number(row.categoriaID),
       customData: parseCustomData(row.custom_data),
-      ownerName: String(row.owner_name || ''),
-      ownerEmail: String(row.owner_email || ''),
-      ownerPhone: String(row.owner_phone || ''),
       authVersion: Number(row.auth_version || 1),
     },
     category: {
@@ -359,6 +380,16 @@ async function findEntity(db, route) {
       active: Boolean(row.category_active),
       code: String(row.category_code),
     },
+    cliente: row.client_id === null || row.client_id === undefined
+      ? null
+      : {
+        id: Number(row.client_id),
+        name: String(row.client_name || ''),
+        email: String(row.client_email || ''),
+        phone: String(row.client_phone || ''),
+        active: Boolean(row.client_active),
+        authVersion: Number(row.client_auth_version || 1),
+      },
   }
 }
 
@@ -366,13 +397,6 @@ function emptyAuth() {
   return { authorized: false, canRequestCode: false, emailHint: '' }
 }
 
-function getClientIp(request) {
-  return String(
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for') ||
-    'local',
-  ).split(',')[0].trim().slice(0, 64)
-}
 
 function asBadRequest(callback) {
   try {
