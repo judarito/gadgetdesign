@@ -57,15 +57,41 @@ RESEND_FROM
 No configures `LOCAL_TURSO_URL` en producción. Las variables privadas no se
 incluyen en el bundle del navegador.
 
-## Preparación de producción
+### Entorno de pruebas (rama `dev`)
 
-La migración es aditiva e idempotente:
+El sitio `gadgetdesign-dev` usa una base de datos Turso propia y secretos
+distintos a los de producción. Para ejecutar migraciones o scripts contra esa
+base desde tu equipo:
+
+```sh
+cp .env.dev.example .env.dev.local   # completa TURSO_TOKEN con:
+                                     #   turso db tokens create gadgetdesign-dev
+set -a && . ./.env.dev.local && set +a
+npm run setup:admin
+```
+
+`.env.dev.local` está ignorado por git. Al exportar las variables, `loadEnv` de
+Vite les da prioridad sobre `.env`, así que el script apunta a la base de
+pruebas y nunca a la de producción. Verifícalo antes de ejecutar algo
+destructivo:
+
+```sh
+set -a && . ./.env.dev.local && set +a
+node -e "import('vite').then(v => console.log(v.loadEnv('', process.cwd(), '').TURSO_URL))"
+```
+
+## Migraciones de esquema
+
+La migración es aditiva e idempotente y se aplica igual en la base de pruebas y
+en la de producción:
 
 ```sh
 npm run setup:admin
 ```
 
-Ejecuta este comando de forma controlada antes de desplegar cambios de esquema.
+Ejecútala de forma controlada antes de desplegar cambios de esquema. Para
+apuntarla a la base de pruebas, exporta antes `.env.dev.local` como se explica
+en [Entorno de pruebas](#entorno-de-pruebas-rama-dev).
 
 ## URL de uso
 
@@ -77,10 +103,47 @@ https://dominio/codigo-corto
 
 Las URLs anteriores con categoría, GUID o alias siguen siendo compatibles.
 
-## Despliegue
+## Entornos
+
+Cada rama despliega en un sitio de Netlify distinto:
+
+| Entorno | Rama | Sitio Netlify | URL | Base de datos |
+| --- | --- | --- | --- | --- |
+| Producción | `main` | `gadgetdesign` | https://gadgetdesign.lat | Turso `gadgetdesign` |
+| Pruebas | `dev` | `gadgetdesign-dev` | https://gadgetdesign-dev.netlify.app | Turso `gadgetdesign-dev` |
+
+Los dos entornos no comparten secretos: usan `APP_AUTH_SECRET`,
+`DATA_ENCRYPTION_KEY` y token de Turso diferentes. Un fallo en pruebas no puede
+falsificar sesiones ni descifrar datos de producción.
+
+El sitio de pruebas es público y no tiene protección por contraseña, por eso
+trabaja contra su propia base de datos. El OTP se imprime en los logs de las
+Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo; se leen
+en Netlify → Logs → Functions.
+
+## Flujo de trabajo
+
+`main` está protegida en GitHub: no acepta commits directos y exige un pull
+request (`enforce_admins` activo, sin force-push ni borrado). El despliegue a
+producción solo ocurre cuando se fusiona un PR en `main`.
 
 ```sh
-netlify deploy --build --prod
+git checkout dev
+# ... cambios ...
+git commit -am "Describe el cambio"
+git push origin dev            # -> despliega en el sitio de pruebas
+
+# Abre el PR dev -> main en GitHub y fusíonalo manualmente cuando esté validado.
+                               # -> despliega en producción
 ```
 
-El despliegue incluye `dist` y las Functions declaradas en `netlify.toml`.
+Antes de fusionar a `main`, ejecuta la suite de integración sobre el entorno
+local:
+
+```sh
+npm run test:functions
+```
+
+No uses `netlify deploy --prod` desde tu equipo: publica el contenido local
+saltándose la revisión del PR que protege `main`. El despliegue normal es un
+`git push` a la rama correspondiente.
