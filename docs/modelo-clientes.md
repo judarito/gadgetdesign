@@ -1,7 +1,7 @@
 # Modelo de clientes y portal del cliente
 
-Estado: **fases 1 y 2 implementadas** (modelo de clientes, autorización por
-pertenencia, panel y portal en `/portal`). Fase 3 (retirar `owner_*`) pendiente.
+Estado: **fases 1, 2 y 3 implementadas** y verificadas en el entorno de
+pruebas. Pendiente el despliegue a producción (ver README, migraciones).
 
 ## Problema
 

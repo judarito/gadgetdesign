@@ -167,7 +167,7 @@ if (hasLegacyOwnerColumns) {
   // tener el nombre vacío y no debe pisar el que ya había.
   await db.execute(`INSERT INTO Clientes (name, email, phone)
 SELECT
-  COALESCE(
+  substr(COALESCE(
     (SELECT NULLIF(TRIM(e2.owner_name), '')
        FROM Entidades e2
       WHERE LOWER(TRIM(e2.owner_email)) = LOWER(TRIM(e.owner_email))
@@ -177,7 +177,7 @@ SELECT
          THEN substr(LOWER(TRIM(e.owner_email)), 1,
                      instr(LOWER(TRIM(e.owner_email)), '@') - 1)
          ELSE LOWER(TRIM(e.owner_email)) END
-  ),
+  ), 1, 100),
   LOWER(TRIM(e.owner_email)),
   (SELECT NULLIF(TRIM(e3.owner_phone), '')
      FROM Entidades e3
