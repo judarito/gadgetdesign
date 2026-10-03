@@ -21,6 +21,7 @@ import {
 const client = ref(null)
 const items = ref([])
 const total = ref(0)
+const page = ref(1)
 const search = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
@@ -32,6 +33,7 @@ const code = ref('')
 const step = ref('email')
 
 const isAuthenticated = computed(() => Boolean(client.value))
+const pending = computed(() => Math.max(total.value - items.value.length, 0))
 const groups = computed(() => {
   const map = new Map()
   for (const item of items.value) {
@@ -50,11 +52,21 @@ onMounted(async () => {
   }
 })
 
-function applyContext(result) {
+function applyContext(result, { append = false } = {}) {
   client.value = result.cliente
-  items.value = result.items || []
+  // El servidor pagina de 50 en 50: sin acumular, un cliente con muchas fichas
+  // (una finca con cien vacas) vería el total pero solo la primera página.
+  items.value = append ? [...items.value, ...(result.items || [])] : (result.items || [])
   total.value = Number(result.total || 0)
+  page.value = Number(result.page || 1)
   code.value = ''
+}
+
+async function loadMore() {
+  if (!pending.value) return
+  await runLoad(async () => {
+    applyContext(await getPortalContext({ search: search.value, page: page.value + 1 }), { append: true })
+  })
 }
 
 async function requestCode() {
@@ -252,6 +264,13 @@ function showToast(message, color = 'success') {
           </article>
         </div>
 
+        <div v-if="pending" class="portal-more">
+          <v-btn variant="tonal" :loading="isLoading" @click="loadMore">
+            Ver {{ pending }} {{ pending === 1 ? 'ficha más' : 'fichas más' }}
+          </v-btn>
+          <span>Mostrando {{ items.length }} de {{ total }}</span>
+        </div>
+
         <p class="portal-note">
           <RefreshCw :size="16" />
           Al abrir una ficha la verás desbloqueada: puedes editar sus datos y agregar nuevos.
@@ -310,6 +329,8 @@ function showToast(message, color = 'success') {
 .portal-open { display: inline-flex; align-items: center; gap: 4px; padding: 9px 14px; color: #0873ff; font-size: .9rem; font-weight: 700; text-decoration: none; background: #edf6ff; border-radius: 8px; }
 .portal-open:hover { background: #dcecff; }
 .portal-note { display: flex; align-items: center; gap: 9px; margin: 26px 0 0; color: #5b6b82; font-size: .88rem; }
+.portal-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 22px; }
+.portal-more span { color: #748298; font-size: .85rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (max-width: 620px) {

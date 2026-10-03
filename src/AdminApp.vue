@@ -61,6 +61,9 @@ import { getQrPrintMetrics } from './services/qrPrintMetrics'
 // está corriendo.
 const PUBLIC_ORIGIN = window.location.origin
 
+// Debe coincidir con BULK_ENTITY_LIMIT de netlify/functions/admin.mjs.
+const BULK_LIMIT = 200
+
 const authenticated = ref(false)
 const password = ref('')
 const showPassword = ref(false)
@@ -126,20 +129,29 @@ const pageTitle = computed(
 // ciegas: cuántas salen y cómo se llaman la primera y la última.
 const bulkPreview = computed(() => {
   const draft = bulkDraft.value
-  const prefix = String(draft.prefix || '')
+  const prefix = String(draft.prefix || '').trim()
   const from = Number(draft.from)
   const to = Number(draft.to)
   const pad = Number(draft.pad)
-  if (!prefix || !Number.isInteger(from) || !Number.isInteger(to) || from > to) {
-    return { valid: false, count: 0, first: '', last: '' }
-  }
-  const safePad = Number.isInteger(pad) && pad >= 1 && pad <= 10 ? pad : 3
+
+  // Los campos vacíos llegan como '' y Number('') es 0, que pasaría por entero
+  // válido: sin comprobarlo, la vista previa diría "1 ficha" con el rango vacío
+  // y el botón quedaría habilitado para algo que el servidor rechaza.
+  const empty = draft.from === '' || draft.to === '' || draft.pad === ''
+  const invalid = empty
+    || !prefix
+    || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from
+    || !Number.isInteger(pad) || pad < 1 || pad > 10
+    || to - from + 1 > BULK_LIMIT
+
+  if (invalid) return { valid: false, count: 0, first: '', last: '' }
+
   const count = to - from + 1
   return {
     valid: true,
     count,
-    first: `${prefix}${String(from).padStart(safePad, '0')}`,
-    last: `${prefix}${String(to).padStart(safePad, '0')}`,
+    first: `${prefix}${String(from).padStart(pad, '0')}`,
+    last: `${prefix}${String(to).padStart(pad, '0')}`,
   }
 })
 
@@ -357,7 +369,9 @@ function openEntityDialog(entity = null) {
 
 /**
  * Resuelve el cliente elegido en el formulario. La opción "nuevo" crea el
- * cliente primero y devuelve su id; el resto del formulario no cambia.
+ * cliente primero y deja su id en el borrador: si después falla el guardado de
+ * la ficha (una identificación duplicada, por ejemplo), el reintento reutiliza
+ * el cliente en vez de intentar crearlo otra vez y chocar con un 409.
  */
 async function resolveDraftClient(draft) {
   if (draft.clienteId !== 'new') return draft.clienteId ?? null
@@ -368,6 +382,7 @@ async function resolveDraftClient(draft) {
     phone: draft.newClient.phone,
     active: true,
   })
+  draft.clienteId = created.id
   await loadClientOptions()
   return created.id
 }

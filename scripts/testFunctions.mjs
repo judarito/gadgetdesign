@@ -377,6 +377,23 @@ try {
   assert(firstPage.total === 100, 'Las cien fichas del lote deben existir y paginarse en dos páginas.')
   assert(codes.size === 100, 'Los cien códigos cortos deben ser únicos.')
 
+  // El portal pagina de 50 en 50: un cliente con más fichas debe poder verlas
+  // todas, no solo la primera página.
+  const ownerMark = logs.length
+  await request('client', 'request-code', { method: 'POST', body: { email: 'cliente@example.com' } })
+  const ownerCode = await waitForOtp(ownerMark)
+  const ownerLogin = await request('client', 'verify-code', {
+    method: 'POST', body: { email: 'cliente@example.com', code: ownerCode }, includeResponse: true,
+  })
+  const ownerCookie = getCookieHeader(ownerLogin.response)
+  const ownerPage1 = await request('client', 'context', { cookie: ownerCookie })
+  const ownerPage2 = await request('client', 'context', { cookie: ownerCookie, query: { page: 2 } })
+  const ownerPage3 = await request('client', 'context', { cookie: ownerCookie, query: { page: 3 } })
+  assert(ownerPage1.total === 101 && ownerPage1.items.length === 50,
+    'El portal debe paginar cuando el cliente tiene más de 50 fichas.')
+  assert(ownerPage2.items.length === 50, 'La segunda página del portal debe traer las siguientes 50.')
+  assert(ownerPage3.items.length === 1, 'La última página del portal debe traer el resto.')
+
   await expectStatus(() => request('entity', 'delete-entity', {
     method: 'DELETE', cookie: entityCookie,
     body: { ...route, confirmation: 'IDENTIFICADOR INCORRECTO' },
@@ -409,6 +426,7 @@ try {
   console.log('✓ Anti-enumeración en el portal (correo desconocido = misma respuesta)')
   console.log('✓ La ficha se abre desbloqueada con la sesión del portal')
   console.log('✓ La lectura con sesión de portal nunca se sirve desde la caché pública')
+  console.log('✓ El portal pagina cuando el cliente tiene más de 50 fichas')
 } finally {
   try {
     process.kill(-server.pid, 'SIGTERM')
