@@ -92,6 +92,12 @@ await db.batch([
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_normalized ON Clientes (LOWER(TRIM(email)))',
   'CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)',
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_lookup ON ClientAccessCodes (cliente_id, created_at)',
+  `CREATE TABLE IF NOT EXISTS ClientOtpRequests (
+    id INTEGER PRIMARY KEY,
+    request_ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
   'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
 ], 'write')
@@ -109,6 +115,7 @@ if (!localEntityColumns.rows.some((column) => column.name === 'clienteID')) {
 await db.batch([
   'DELETE FROM EntityAccessCodes',
   'DELETE FROM ClientAccessCodes',
+  'DELETE FROM ClientOtpRequests',
   'DELETE FROM EntityAliases',
   'DELETE FROM Entidades',
   'DELETE FROM CategoriaSugerencias',

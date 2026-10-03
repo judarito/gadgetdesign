@@ -122,31 +122,39 @@ async function requestCode(request, payload) {
   const now = Math.floor(Date.now() / 1000)
   const ip = getClientIp(request)
 
-  // La respuesta es siempre la misma exista o no el correo: este endpoint
-  // recibe una dirección de cualquiera y no debe servir para descubrir clientes.
-  const cliente = await findClientByEmail(db, email)
-  if (!cliente || !cliente.active) return json({ ok: true })
+  await db.batch([
+    { sql: 'DELETE FROM ClientOtpRequests WHERE created_at < ?', args: [now - OTP_RETENTION_SECONDS] },
+    { sql: 'DELETE FROM ClientAccessCodes WHERE created_at < ?', args: [now - OTP_RETENTION_SECONDS] },
+  ], 'write')
 
-  await db.execute({
-    sql: 'DELETE FROM ClientAccessCodes WHERE created_at < ?',
-    args: [now - OTP_RETENTION_SECONDS],
+  // El límite por IP se registra y se evalúa para TODAS las peticiones, exista o
+  // no el correo, y es el único que puede responder 429. Si dependiera de que el
+  // correo exista, la diferencia entre 200 y 429 lo delataría. Va en su propia
+  // tabla, sin foreign key, porque tiene que admitir correos desconocidos.
+  const recent = await db.execute({
+    sql: 'SELECT COUNT(*) AS total FROM ClientOtpRequests WHERE request_ip = ? AND created_at >= ?',
+    args: [ip, now - OTP_WINDOW_SECONDS],
   })
-
-  const limits = await db.execute({
-    sql: `SELECT
-            SUM(CASE WHEN cliente_id = ? THEN 1 ELSE 0 END) AS client_requests,
-            SUM(CASE WHEN request_ip = ? THEN 1 ELSE 0 END) AS ip_requests
-          FROM ClientAccessCodes
-          WHERE created_at >= ?`,
-    args: [cliente.id, ip, now - OTP_WINDOW_SECONDS],
-  })
-  const limit = limits.rows[0]
-  if (
-    Number(limit?.client_requests || 0) >= OTP_LIMIT_PER_CLIENT ||
-    Number(limit?.ip_requests || 0) >= OTP_LIMIT_PER_IP
-  ) {
+  if (Number(recent.rows[0]?.total || 0) >= OTP_LIMIT_PER_IP) {
     throw new HttpError(429, 'Se solicitaron demasiados códigos. Espera 15 minutos.')
   }
+  await db.execute({
+    sql: 'INSERT INTO ClientOtpRequests (request_ip, created_at) VALUES (?, ?)',
+    args: [ip, now],
+  })
+
+  const cliente = await findClientByEmail(db, email)
+
+  // A partir de aquí la respuesta es siempre {ok:true}, exista o no el correo y
+  // haya agotado o no su límite por cliente. Ese límite solo decide si se envía
+  // el correo: un 429 aquí volvería a distinguir los correos registrados.
+  if (!cliente || !cliente.active) return json({ ok: true })
+
+  const perClient = await db.execute({
+    sql: 'SELECT COUNT(*) AS total FROM ClientAccessCodes WHERE cliente_id = ? AND created_at >= ?',
+    args: [cliente.id, now - OTP_WINDOW_SECONDS],
+  })
+  if (Number(perClient.rows[0]?.total || 0) >= OTP_LIMIT_PER_CLIENT) return json({ ok: true })
 
   const code = generateOtp()
   const inserted = await db.execute({
@@ -190,9 +198,13 @@ async function verifyCode(request, payload) {
     args: [cliente.id, now],
   })
   const accessCode = result.rows[0]
-  if (!accessCode) throw new HttpError(400, 'El código venció. Solicita uno nuevo.')
+  // Un solo mensaje para todos los casos negativos. Distinguir "no existe el
+  // correo" de "no hay código pendiente" convertiría este endpoint en un
+  // comprobador de direcciones registradas. El bloqueo por intentos tampoco
+  // puede responder 429: solo ocurre en correos que existen.
+  if (!accessCode) throw new HttpError(400, 'El código no es correcto o venció.')
   if (Number(accessCode.attempts) >= OTP_MAX_ATTEMPTS) {
-    throw new HttpError(429, 'El código fue bloqueado por demasiados intentos.')
+    throw new HttpError(400, 'El código no es correcto o venció.')
   }
 
   if (!safeEqualHex(String(accessCode.code_hash), hashOtp('client', cliente.id, code))) {
@@ -200,14 +212,22 @@ async function verifyCode(request, payload) {
       sql: 'UPDATE ClientAccessCodes SET attempts = attempts + 1 WHERE id = ?',
       args: [accessCode.id],
     })
-    throw new HttpError(400, 'El código no es correcto.')
+    throw new HttpError(400, 'El código no es correcto o venció.')
   }
 
   // La comprobación de estado va después de validar el código: si fuera antes,
   // el mensaje confirmaría qué correos están registrados.
   if (!cliente.active) throw new HttpError(403, 'Esta cuenta está inactiva. Contacta al administrador.')
 
-  await db.execute({ sql: 'UPDATE ClientAccessCodes SET consumed = 1 WHERE id = ?', args: [accessCode.id] })
+  // Consumo atómico: si dos peticiones llegan a la vez con el mismo código,
+  // solo la que consigue marcarlo pasa. Sin el `consumed = 0` en el WHERE las
+  // dos leerían la fila y las dos emitirían sesión.
+  const claimed = await db.execute({
+    sql: 'UPDATE ClientAccessCodes SET consumed = 1 WHERE id = ? AND consumed = 0',
+    args: [accessCode.id],
+  })
+  if (!Number(claimed.rowsAffected)) throw new HttpError(400, 'El código no es correcto o venció.')
+
   const token = signSession({
     type: 'client',
     clienteId: cliente.id,

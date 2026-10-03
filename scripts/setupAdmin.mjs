@@ -1,7 +1,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
-import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
+import { applyDataIntegrityConstraints, cleanText } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const url = env.TURSO_URL || env.VITE_TURSO_URL
@@ -147,6 +147,17 @@ await db.execute(
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
 )
 
+await db.execute(`CREATE TABLE IF NOT EXISTS ClientOtpRequests (
+  id INTEGER PRIMARY KEY,
+  request_ip TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
+)
+
+
 // La limpieza por antigüedad no puede usar los índices que empiezan por id.
 await db.execute(
   'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
@@ -170,30 +181,34 @@ SELECT
   substr(COALESCE(
     (SELECT NULLIF(TRIM(e2.owner_name), '')
        FROM Entidades e2
-      WHERE LOWER(TRIM(e2.owner_email)) = LOWER(TRIM(e.owner_email))
+      WHERE LOWER(${cleanText('e2.owner_email')}) = LOWER(${cleanText('e.owner_email')})
         AND NULLIF(TRIM(e2.owner_name), '') IS NOT NULL
       ORDER BY e2.id DESC LIMIT 1),
-    CASE WHEN instr(LOWER(TRIM(e.owner_email)), '@') > 1
-         THEN substr(LOWER(TRIM(e.owner_email)), 1,
-                     instr(LOWER(TRIM(e.owner_email)), '@') - 1)
-         ELSE LOWER(TRIM(e.owner_email)) END
+    CASE WHEN instr(LOWER(${cleanText('e.owner_email')}), '@') > 1
+         THEN substr(LOWER(${cleanText('e.owner_email')}), 1,
+                     instr(LOWER(${cleanText('e.owner_email')}), '@') - 1)
+         ELSE LOWER(${cleanText('e.owner_email')}) END
   ), 1, 100),
-  LOWER(TRIM(e.owner_email)),
+  LOWER(${cleanText('e.owner_email')}),
   (SELECT NULLIF(TRIM(e3.owner_phone), '')
      FROM Entidades e3
-    WHERE LOWER(TRIM(e3.owner_email)) = LOWER(TRIM(e.owner_email))
+    WHERE LOWER(${cleanText('e3.owner_email')}) = LOWER(${cleanText('e.owner_email')})
       AND NULLIF(TRIM(e3.owner_phone), '') IS NOT NULL
     ORDER BY e3.id DESC LIMIT 1)
 FROM Entidades e
 WHERE e.owner_email IS NOT NULL
   AND TRIM(e.owner_email) <> ''
+  -- Un correo que tras normalizar lleva un espacio dentro no es un correo
+  -- valido: la app lo rechazaria siempre y ese cliente no podria entrar nunca.
+  -- Se deja sin cliente para que el guardia de setup:drop-legacy lo reporte.
+  AND INSTR(${cleanText('e.owner_email')}, ' ') = 0
   AND e.id = (
     SELECT MIN(e4.id) FROM Entidades e4
-    WHERE LOWER(TRIM(e4.owner_email)) = LOWER(TRIM(e.owner_email))
+    WHERE LOWER(${cleanText('e4.owner_email')}) = LOWER(${cleanText('e.owner_email')})
   )
   AND NOT EXISTS (
     SELECT 1 FROM Clientes c
-    WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(e.owner_email))
+    WHERE LOWER(${cleanText('c.email')}) = LOWER(${cleanText('e.owner_email')})
   )`)
 
   // Vincula cada ficha con su cliente. Las fichas sin correo quedan en NULL y
@@ -201,11 +216,12 @@ WHERE e.owner_email IS NOT NULL
   await db.execute(`UPDATE Entidades
 SET clienteID = (
   SELECT c.id FROM Clientes c
-  WHERE LOWER(TRIM(c.email)) = LOWER(TRIM(Entidades.owner_email))
+  WHERE LOWER(${cleanText('c.email')}) = LOWER(${cleanText('Entidades.owner_email')})
 )
 WHERE clienteID IS NULL
   AND owner_email IS NOT NULL
-  AND TRIM(owner_email) <> ''`)
+  AND TRIM(owner_email) <> ''
+  AND INSTR(${cleanText('Entidades.owner_email')}, ' ') = 0`)
 }
 
 async function generateUniqueShortCode() {

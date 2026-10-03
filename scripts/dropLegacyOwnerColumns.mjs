@@ -34,17 +34,24 @@ if (!present.length) {
 
 // Antes de borrar nada: si alguna ficha tiene correo heredado pero no quedó
 // vinculada a un cliente, eliminar la columna perdería a su dueño.
-const pending = await db.execute(`SELECT COUNT(*) AS total FROM Entidades
-  WHERE clienteID IS NULL
-    AND owner_email IS NOT NULL
-    AND TRIM(owner_email) <> ''`)
+//
+// La consulta se condiciona a que `owner_email` siga existiendo para que el
+// script se pueda reanudar: si un intento anterior murió después de borrarla,
+// volver a ejecutarlo debe poder terminar el trabajo en vez de fallar con
+// "no such column".
+if (present.includes('owner_email')) {
+  const pending = await db.execute(`SELECT COUNT(*) AS total FROM Entidades
+    WHERE clienteID IS NULL
+      AND owner_email IS NOT NULL
+      AND TRIM(owner_email) <> ''`)
 
-const orphans = Number(pending.rows[0]?.total || 0)
-if (orphans) {
-  throw new Error(
-    `Hay ${orphans} fichas con correo heredado y sin cliente vinculado. ` +
-    'Ejecuta antes "npm run setup:admin" para crear los clientes.',
-  )
+  const orphans = Number(pending.rows[0]?.total || 0)
+  if (orphans) {
+    throw new Error(
+      `Hay ${orphans} fichas con correo heredado y sin cliente vinculado. ` +
+      'Ejecuta antes "npm run setup:admin" para crear los clientes.',
+    )
+  }
 }
 
 // SQLite bloquea DROP COLUMN si algún trigger nombra la columna, así que los

@@ -304,25 +304,34 @@ async function saveClient(db, client) {
   }
 
   const id = validId(client.id, 'cliente')
-  const current = await db.execute({ sql: 'SELECT email FROM Clientes WHERE id = ? LIMIT 1', args: [id] })
+  const current = await db.execute({
+    sql: 'SELECT email, active FROM Clientes WHERE id = ? LIMIT 1',
+    args: [id],
+  })
   if (!current.rows[0]) throw new HttpError(404, 'No se encontró el cliente.')
 
-  // Cambiar el correo es cambiar la credencial de acceso: corta las sesiones
-  // abiertas incrementando auth_version y descartando los códigos pendientes.
+  // Cambiar el correo o desactivar es cambiar la credencial de acceso: corta las
+  // sesiones abiertas incrementando auth_version y descartando los códigos
+  // pendientes. Sin esto, al reactivar volverían a servir los códigos y las
+  // sesiones de antes de la desactivación.
   const emailChanged = String(current.rows[0].email || '').toLowerCase() !== email
+  const activeChanged = Boolean(current.rows[0].active) !== Boolean(active)
+  const revoke = emailChanged || !active
 
   await db.execute({
     sql: `UPDATE Clientes
           SET name = ?, email = ?, phone = ?, active = ?,
               auth_version = auth_version + ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?`,
-    args: [name, email, phone, active, emailChanged ? 1 : 0, id],
+    args: [name, email, phone, active, revoke ? 1 : 0, id],
   })
 
-  if (emailChanged) {
+  if (revoke) {
     await db.execute({ sql: 'DELETE FROM ClientAccessCodes WHERE cliente_id = ?', args: [id] })
   }
-  if (emailChanged || !active) await purgeClientEntitiesCache(db, id)
+  // La lectura pública anónima se cachea 60 s y lleva dentro `canRequestCode`,
+  // así que hay que purgar en los dos sentidos: al desactivar y al reactivar.
+  if (emailChanged || activeChanged) await purgeClientEntitiesCache(db, id)
 
   return json({ ok: true, id })
 }
@@ -533,26 +542,33 @@ async function updateEntity(db, payload) {
   const id = validId(payload.id, 'entidad')
   const identification = requiredText(payload.identification, IDENTIFICATION_MAX_LENGTH, 'Identificación')
   const categoryId = validId(payload.categoryId, 'categoría')
-  const cliente = await resolveClient(db, payload)
   await ensureUniqueIdentification(db, identification, id)
   const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
   if (!current.rows[0]) throw new HttpError(404, 'No se encontró la entidad.')
 
   const previousClientId = current.rows[0].clienteID === null ? null : Number(current.rows[0].clienteID)
 
+  // Un PATCH que no menciona al cliente no debe desvincularlo. Solo se cambia si
+  // el campo viene, aunque venga como null explícito: así una llamada parcial
+  // (o un consumidor antiguo que solo mande identificación y categoría) no deja
+  // la ficha huérfana y en solo lectura sin avisar.
+  const touchesClient = 'clienteId' in payload || 'ownerEmail' in payload
+  const cliente = touchesClient ? await resolveClient(db, payload) : null
+  const nextClientId = touchesClient ? (cliente?.id ?? null) : previousClientId
+
   await db.execute({
     sql: `UPDATE Entidades
           SET Identificacion = ?, categoriaID = ?, clienteID = ?
           WHERE id = ?`,
-    args: [identification, categoryId, cliente?.id ?? null, id],
+    args: [identification, categoryId, nextClientId, id],
   })
 
   await purgeEntityCache(id)
   // Las demás fichas del cliente anterior pierden el enlace en su listado.
-  if (previousClientId && previousClientId !== (cliente?.id ?? null)) {
+  if (previousClientId && previousClientId !== nextClientId) {
     await purgeClientEntitiesCache(db, previousClientId)
   }
-  return json({ ok: true, clienteId: cliente?.id ?? null })
+  return json({ ok: true, clienteId: nextClientId })
 }
 
 async function regenerateEntity(db, payload) {

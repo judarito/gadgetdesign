@@ -1,4 +1,4 @@
-const cleanText = (column) => `TRIM(
+export const cleanText = (column) => `TRIM(
   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
     ${column},
     CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), CHAR(160), ' '),
@@ -191,7 +191,7 @@ async function assertExistingDataIsValid(db) {
     {
       sql: `SELECT id FROM Clientes
             WHERE name = '' OR LENGTH(name) > 100
-               OR email = '' OR LENGTH(email) > 254
+               OR email = '' OR LENGTH(email) > 254 OR INSTR(email, ' ') > 0
                OR LENGTH(COALESCE(phone, '')) > 30
                OR auth_version < 1 LIMIT 1`,
       message: 'Hay un cliente con nombre, correo o celular inválido.',
@@ -258,7 +258,7 @@ async function createValidationTriggers(db) {
     NEW.name IS NULL OR NEW.name = '' OR NEW.name <> TRIM(NEW.name) OR LENGTH(NEW.name) > 100
     OR ${invisibleCheck('NEW.name')}
     OR NEW.email IS NULL OR NEW.email = '' OR NEW.email <> LOWER(TRIM(NEW.email))
-    OR LENGTH(NEW.email) > 254
+    OR LENGTH(NEW.email) > 254 OR INSTR(NEW.email, ' ') > 0
     OR LENGTH(COALESCE(NEW.phone, '')) > 30
     OR (NEW.phone IS NOT NULL AND NEW.phone <> TRIM(NEW.phone))
     OR NEW.auth_version < 1`

@@ -1073,7 +1073,7 @@ function getCategoryCopy(currentCategory) {
         <div class="privacy-dialog__footer">
           <v-btn variant="text" @click="privacyDialog = false">Cerrar</v-btn>
           <v-btn
-            v-if="auth.authorized"
+            v-if="auth.scope === 'entity'"
             color="error"
             variant="tonal"
             @click="openEntityDeletion"
@@ -1081,7 +1081,7 @@ function getCategoryCopy(currentCategory) {
             <Trash2 :size="17" /> Eliminar toda la ficha
           </v-btn>
           <v-btn
-            v-else-if="auth.canRequestCode"
+            v-else-if="auth.canRequestCode && !auth.authorized"
             color="primary"
             variant="flat"
             @click="openEntityDeletion"
@@ -1089,7 +1089,11 @@ function getCategoryCopy(currentCategory) {
             <LockKeyhole :size="17" /> Verificar para administrar
           </v-btn>
         </div>
-        <p v-if="!auth.authorized && !auth.canRequestCode" class="privacy-readonly-note">
+        <p v-if="auth.authorized && auth.scope !== 'entity'" class="privacy-readonly-note">
+          Estás dentro desde el portal del cliente. Para eliminar la ficha tienes que abrirla
+          con su enlace e introducir el código que llega al correo.
+        </p>
+        <p v-else-if="!auth.authorized && !auth.canRequestCode" class="privacy-readonly-note">
           Esta ficha no tiene un correo responsable configurado. Solo el administrador puede eliminarla.
         </p>
       </v-card>

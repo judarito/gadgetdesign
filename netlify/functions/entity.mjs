@@ -22,11 +22,12 @@ import {
   OTP_SECONDS,
   decryptValue,
   encryptValue,
+  entityAccessScope,
   generateOtp,
-  hasEntityAccess,
   hashOtp,
   maskEmail,
   requireEntityAccess,
+  requireEntitySession,
   safeEqualHex,
   signSession,
 } from './_lib/security.mjs'
@@ -97,7 +98,10 @@ async function getContext(request, route, forceAuthorized = false) {
   const { entity, category, cliente } = await findEntity(db, route)
   if (!entity || !category) return { category: null, entity: null, suggestions: [], auth: emptyAuth() }
 
-  const authorized = forceAuthorized || hasEntityAccess(request, entity, cliente)
+  // El alcance viaja al cliente: la pagina de la ficha borra la ficha entera
+  // solo si la sesion es la de esa ficha, no la del portal.
+  const scope = forceAuthorized ? 'entity' : entityAccessScope(request, entity, cliente)
+  const authorized = Boolean(scope)
   const suggestionsResult = await db.execute({
     sql: `SELECT id, name, data_type
           FROM CategoriaSugerencias
@@ -122,6 +126,7 @@ async function getContext(request, route, forceAuthorized = false) {
     })),
     auth: {
       authorized,
+      scope,
       canRequestCode: Boolean(cliente?.email && cliente.active),
       emailHint: maskEmail(cliente?.email),
     },
@@ -211,7 +216,14 @@ async function verifyCode(request, payload) {
     throw new HttpError(400, 'El código no es correcto.')
   }
 
-  await db.execute({ sql: 'UPDATE EntityAccessCodes SET consumed = 1 WHERE id = ?', args: [accessCode.id] })
+  // Consumo atómico: evita que dos peticiones simultáneas con el mismo código
+  // emitan dos sesiones.
+  const claimed = await db.execute({
+    sql: 'UPDATE EntityAccessCodes SET consumed = 1 WHERE id = ? AND consumed = 0',
+    args: [accessCode.id],
+  })
+  if (!Number(claimed.rowsAffected)) throw new HttpError(400, 'El código venció. Solicita uno nuevo.')
+
   const token = signSession({
     type: 'entity',
     entityId: Number(entity.id),
@@ -268,7 +280,7 @@ async function deleteCurrentEntity(request, payload) {
   const db = getDb()
   const { entity, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
-  requireEntityAccess(request, entity, cliente)
+  requireEntitySession(request, entity, cliente)
 
   const confirmation = String(payload.confirmation || '').trim()
   if (confirmation !== entity.identificacion.trim()) {

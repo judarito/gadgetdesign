@@ -247,6 +247,20 @@ try {
   assert(!orphanContext.auth.canRequestCode && !orphanContext.auth.authorized,
     'Una ficha sin cliente debe quedar en solo lectura.')
 
+  // Un PATCH que no menciona al cliente no debe dejarlo huérfano.
+  const singleId = (await request('admin', 'entities', {
+    cookie: adminCookie, query: { search: 'MOTO-010' },
+  })).items[0].id
+  await request('admin', 'update-entity', {
+    method: 'PATCH', cookie: adminCookie,
+    body: { id: singleId, identification: 'MOTO-010', categoryId: motoCategoryId },
+  })
+  const afterPartial = await request('admin', 'entities', {
+    cookie: adminCookie, query: { search: 'MOTO-010' },
+  })
+  assert(afterPartial.items[0].clienteId === newClient.id,
+    'Un PATCH sin clienteId no debe desvincular la ficha de su cliente.')
+
   const moto1 = clientEntities.items.find((item) => item.identification === 'MOTO-001')
   const moto2 = clientEntities.items.find((item) => item.identification === 'MOTO-002')
 
@@ -274,6 +288,19 @@ try {
     method: 'POST', body: { email: 'finca@example.com', code: '000000' },
   }), 400, 'Un código incorrecto debe rechazarse en el portal.')
 
+  // Un código incorrecto, un correo sin código pendiente y un correo que no
+  // existe deben responder exactamente igual: si no, el endpoint sirve para
+  // averiguar qué direcciones están registradas.
+  const wrongCode = await statusOf(() => request('client', 'verify-code', {
+    method: 'POST', body: { email: 'finca@example.com', code: '000001' },
+  }))
+  const unknownEmail = await statusOf(() => request('client', 'verify-code', {
+    method: 'POST', body: { email: 'desconocido@example.com', code: '000001' },
+  }))
+  assert(wrongCode.status === 400 && unknownEmail.status === 400
+    && wrongCode.message === unknownEmail.message,
+  'Un código incorrecto y un correo desconocido deben dar la misma respuesta.')
+
   const portalLogin = await request('client', 'verify-code', {
     method: 'POST', body: { email: 'finca@example.com', code: portalCode }, includeResponse: true,
   })
@@ -282,6 +309,22 @@ try {
     'El portal debe emitir su propia cookie de sesión.')
   assert(portalLogin.data.cliente.email === 'finca@example.com', 'El portal debe saludar al cliente.')
   assert(portalLogin.data.total === 4, 'El portal debe listar todas las fichas del cliente.')
+
+  const noPending = await statusOf(() => request('client', 'verify-code', {
+    method: 'POST', body: { email: 'finca@example.com', code: '000002' },
+  }))
+  assert(noPending.status === 400 && noPending.message === unknownEmail.message,
+    'Un correo registrado sin código pendiente debe responder igual que uno desconocido.')
+
+  // El límite por cliente no puede delatar el correo con un 429: se agota en
+  // silencio y la respuesta sigue siendo la misma.
+  for (let extra = 0; extra < 5; extra += 1) {
+    const repeated = await request('client', 'request-code', {
+      method: 'POST', body: { email: 'finca@example.com' },
+    })
+    assert(repeated.ok === true,
+      'Agotar el límite por cliente no debe cambiar la respuesta de request-code.')
+  }
 
   const portalContext = await request('client', 'context', {
     cookie: clientCookie, includeResponse: true,
@@ -328,6 +371,16 @@ try {
     method: 'POST', cookie: entityCookie,
     body: { token: moto1.shortCode, data: { key: 'Intruso', value: 'No', dataType: 'text' } },
   }), 401, 'La sesión de una ficha no debe servir para otra ficha del mismo cliente.')
+
+  // El portal administra los datos, pero no borra la ficha entera: eso destruye
+  // también todos sus datos y exige haber entrado por el enlace de la ficha.
+  await expectStatus(() => request('entity', 'delete-entity', {
+    method: 'DELETE', cookie: clientCookie,
+    body: { token: moto2.shortCode, confirmation: moto2.identification },
+  }), 401, 'El portal no debe poder borrar la ficha entera.')
+  const stillThere = await request('entity', 'context', { query: { token: moto2.shortCode } })
+  assert(stillThere.entity?.identificacion === moto2.identification,
+    'La ficha debe seguir existiendo tras el intento desde el portal.')
 
   // Cambiar el correo es cambiar la credencial: corta las sesiones abiertas.
   await request('admin', 'save-client', {
@@ -400,6 +453,15 @@ try {
   assert(ownerPage2.items.length === 50, 'La segunda página del portal debe traer las siguientes 50.')
   assert(ownerPage3.items.length === 1, 'La última página del portal debe traer el resto.')
 
+  // Reactivar al cliente no debe devolver la validez a las sesiones ni a los
+  // códigos que había antes de desactivarlo.
+  await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: newClient.id, name: 'Finca El Paraíso', email: 'nueva@example.com', active: true },
+  })
+  await expectStatus(() => request('client', 'context', { cookie: clientCookie }), 401,
+    'Reactivar al cliente no debe resucitar las sesiones anteriores.')
+
   await expectStatus(() => request('entity', 'delete-entity', {
     method: 'DELETE', cookie: entityCookie,
     body: { ...route, confirmation: 'IDENTIFICADOR INCORRECTO' },
@@ -433,6 +495,10 @@ try {
   console.log('✓ La ficha se abre desbloqueada con la sesión del portal')
   console.log('✓ La lectura con sesión de portal nunca se sirve desde la caché pública')
   console.log('✓ El portal pagina cuando el cliente tiene más de 50 fichas')
+  console.log('✓ Los errores del portal no distinguen correos registrados')
+  console.log('✓ El portal no borra la ficha entera; eso exige la sesión de la ficha')
+  console.log('✓ Un PATCH parcial no desvincula la ficha de su cliente')
+  console.log('✓ Reactivar un cliente no resucita sus sesiones anteriores')
 } finally {
   try {
     process.kill(-server.pid, 'SIGTERM')
@@ -482,6 +548,17 @@ async function waitForOtp(since = 0) {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`No se encontró el OTP en la consola.\n${logs.slice(-4000)}`)
+}
+
+/** Estado y mensaje de una peticion que puede fallar, sin lanzar. */
+async function statusOf(callback) {
+  try {
+    await callback()
+    return { status: 200, message: '' }
+  } catch (error) {
+    const match = String(error.message).match(/: (\d{3}) (.*)$/)
+    return { status: Number(match?.[1] || 0), message: match?.[2] || String(error.message) }
+  }
 }
 
 function getCookieHeader(response) {

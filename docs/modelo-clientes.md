@@ -83,10 +83,14 @@ Notas:
   `EntityAccessCodes (created_at)`, porque la limpieza
   `DELETE ... WHERE created_at < ?` no puede usar el índice existente
   `(entity_id, created_at)`.
-- **Las foreign keys no están activas.** `netlify/functions/_lib/db.mjs` crea el
-  cliente sin `PRAGMA foreign_keys = ON`, y SQLite las trae desactivadas. Por eso
-  `deleteCurrentEntity` borra códigos y alias a mano. Con `clienteID` se sigue el
-  mismo estilo del proyecto: validar con triggers, no confiar en la FK.
+- **Corrección: las foreign keys SÍ se aplican.** Este documento afirmaba lo
+  contrario («`db.mjs` no activa `PRAGMA foreign_keys`, y SQLite las trae
+  desactivadas»). Es falso: se comprobó insertando un huérfano contra el cliente
+  local de libSQL y la base lo rechazó con `FOREIGN KEY constraint failed`. Eso
+  obligó a cambiar el diseño del límite de uso del portal: la primera versión
+  registraba las peticiones en `ClientAccessCodes` con un `cliente_id` centinela,
+  y la foreign key lo rechazó. Ahora las peticiones viven en `ClientOtpRequests`,
+  una tabla sin foreign key, porque tiene que admitir correos que no existen.
 
 ### Validación en la base
 
@@ -456,6 +460,40 @@ en dos sitios, o solo en `Clientes`.
   usaba el formulario anterior y evita romper a cualquier consumidor de la API.
 - **El servicio `getClientIp` y el límite de datos personalizados** dejan de estar
   duplicados en tres archivos: viven en `_lib/http.mjs` y en `services/customData.js`.
+
+### Correcciones tras la revisión adversarial
+
+Una revisión escéptica del PR encontró cinco cosas reales que se corrigieron:
+
+1. **Enumeración de correos en el portal.** `verify-code` daba un mensaje distinto
+   para «el correo no existe» y «no hay código pendiente», y `request-code`
+   respondía 429 solo cuando el cliente existía. Los dos oráculos están cerrados:
+   todos los negativos de `verify-code` comparten un único mensaje, y el único 429
+   posible depende solo de la IP, que se registra para todas las peticiones.
+2. **La sesión del portal podía borrar la ficha entera**, en contra de lo que dice
+   este documento. Ahora `deleteCurrentEntity` exige `requireEntitySession`, que
+   solo acepta la sesión de esa ficha; la interfaz esconde el botón cuando la
+   sesión viene del portal.
+3. **Un PATCH de entidad sin `clienteId` desvinculaba al dueño** y dejaba la ficha
+   en solo lectura sin avisar. Ahora solo se toca el vínculo si el campo viene.
+4. **La migración normalizaba distinto que su propio chequeo de duplicados**, lo
+   que podía crear clientes duplicados y abortar de forma irrepetible. El backfill
+   usa ahora la misma función `cleanText`, y salta los correos que tras normalizar
+   llevan un espacio dentro (no serían utilizables) para que el guardia de
+   `setup:drop-legacy` los reporte.
+5. **Desactivar un cliente no revocaba** sus códigos ni sus sesiones: al reactivar
+   volvían a servir. Ahora desactivar sube `auth_version` y borra los códigos
+   pendientes. También se purga la caché en los dos sentidos.
+
+Además se hizo atómico el consumo del OTP
+(`UPDATE ... SET consumed = 1 WHERE id = ? AND consumed = 0`), lo que cierra la
+ventana en la que dos peticiones simultáneas podían emitir dos sesiones con el
+mismo código.
+
+Quedan sin tocar, por ser previos a este trabajo y ajenos a su alcance: cambiar
+la contraseña del admin no revoca sus sesiones, `emailHint` se publica incluso con
+el cliente inactivo, `parseCustomData` oculta todos los datos si un ítem es
+inválido, y los contadores de paginación no unen `Categorias` mientras la lista sí.
 
 ## 11. Riesgos
 
