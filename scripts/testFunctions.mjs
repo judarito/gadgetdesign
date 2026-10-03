@@ -206,6 +206,12 @@ try {
   await request('admin', 'save-category', {
     method: 'POST', cookie: adminCookie, body: { name: 'Motos', code: 'MOTO', active: true },
   })
+
+  // Una categoría con un código reservado dejaría su URL larga inalcanzable.
+  await expectStatus(() => request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie, body: { name: 'Reservada', code: 'ADMIN', active: true },
+  }), 400, 'No debe permitir un código de categoría que ocupa una ruta reservada.')
+
   const categoryOptions = await request('admin', 'category-options', { cookie: adminCookie })
   const motoCategoryId = categoryOptions.find((category) => category.code === 'MOTO').id
 

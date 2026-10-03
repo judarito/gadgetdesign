@@ -31,6 +31,9 @@ const toast = ref({ visible: false, message: '', color: 'success' })
 const email = ref('')
 const code = ref('')
 const step = ref('email')
+// Mientras se comprueba si ya hay sesión no debe verse el formulario de correo:
+// un cliente con sesión abierta vería un parpadeo del login antes del listado.
+const checkingSession = ref(true)
 
 const isAuthenticated = computed(() => Boolean(client.value))
 const pending = computed(() => Math.max(total.value - items.value.length, 0))
@@ -49,6 +52,8 @@ onMounted(async () => {
   } catch (error) {
     // Un 401 solo significa que todavía no hay sesión de portal.
     if (error.status !== 401) errorMessage.value = error.message
+  } finally {
+    checkingSession.value = false
   }
 })
 
@@ -113,19 +118,47 @@ async function clearSearch() {
   await applySearch()
 }
 
+/**
+ * La ruta pública resuelve por código corto o por token interno; el id numérico
+ * de la ficha no resuelve nunca. Sin código corto no hay enlace que ofrecer, así
+ * que se devuelve cadena vacía y la interfaz no pinta el enlace.
+ */
 function buildEntityUrl(item) {
-  const origin = window.location.origin
-  if (item.shortCode) return `${origin}/${item.shortCode}`
-  return `${origin}/${item.categoryCode}/${item.id}`
+  if (!item.shortCode) return ''
+  return `${window.location.origin}/${item.shortCode}`
 }
 
 async function copyUrl(item) {
+  const url = buildEntityUrl(item)
+  if (!url) {
+    showToast('Esta ficha todavía no tiene enlace público.', 'error')
+    return
+  }
   try {
-    await navigator.clipboard.writeText(buildEntityUrl(item))
+    await navigator.clipboard.writeText(url)
     showToast('Enlace copiado al portapapeles.')
   } catch {
     showToast('No fue posible copiar el enlace.', 'error')
   }
+}
+
+/**
+ * La sesión del portal puede dejar de valer a mitad de uso: expira a las 8 horas
+ * o el administrador cambia el correo del cliente, lo que sube su auth_version.
+ * En ese caso no basta con pintar el error: hay que volver al formulario, o el
+ * cliente se queda viendo su listado viejo como si siguiera dentro.
+ */
+function handleError(error) {
+  if (error?.status === 401) {
+    client.value = null
+    items.value = []
+    total.value = 0
+    page.value = 1
+    step.value = 'email'
+    showToast('Tu sesión expiró. Vuelve a entrar con tu correo.', 'error')
+    return
+  }
+  errorMessage.value = error?.message || 'Ocurrió un error inesperado.'
 }
 
 async function runLoad(callback) {
@@ -134,7 +167,7 @@ async function runLoad(callback) {
   try {
     await callback()
   } catch (error) {
-    errorMessage.value = error.message || 'Ocurrió un error inesperado.'
+    handleError(error)
   } finally {
     isLoading.value = false
   }
@@ -146,8 +179,8 @@ async function runAction(callback) {
   try {
     await callback()
   } catch (error) {
-    errorMessage.value = error.message || 'Ocurrió un error inesperado.'
-    showToast(errorMessage.value, 'error')
+    handleError(error)
+    if (error?.status !== 401) showToast(errorMessage.value, 'error')
   } finally {
     isSaving.value = false
   }
@@ -171,7 +204,11 @@ function showToast(message, color = 'success') {
         </v-btn>
       </header>
 
-      <section v-if="!isAuthenticated" class="portal-login">
+      <section v-if="checkingSession" class="portal-login">
+        <p class="portal-hint" role="status">Comprobando tu sesión...</p>
+      </section>
+
+      <section v-else-if="!isAuthenticated" class="portal-login">
         <h1>Mis fichas</h1>
         <p>Entra con el correo que registró el administrador y administra todo lo que está a tu nombre.</p>
 
@@ -257,9 +294,10 @@ function showToast(message, color = 'success') {
             </div>
             <div class="portal-item-actions">
               <button type="button" title="Copiar enlace" @click="copyUrl(item)"><Copy :size="18" /></button>
-              <a :href="buildEntityUrl(item)" class="portal-open">
+              <a v-if="buildEntityUrl(item)" :href="buildEntityUrl(item)" class="portal-open">
                 Abrir ficha <ChevronRight :size="17" />
               </a>
+              <span v-else class="portal-nolink">Sin enlace público</span>
             </div>
           </article>
         </div>
@@ -331,6 +369,7 @@ function showToast(message, color = 'success') {
 .portal-note { display: flex; align-items: center; gap: 9px; margin: 26px 0 0; color: #5b6b82; font-size: .88rem; }
 .portal-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 22px; }
 .portal-more span { color: #748298; font-size: .85rem; }
+.portal-nolink { color: #8a97a8; font-size: .85rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (max-width: 620px) {

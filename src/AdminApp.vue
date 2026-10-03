@@ -188,10 +188,16 @@ async function logout() {
   await clearAdminSession().catch(() => {})
   authenticated.value = false
   categories.value = []
+  categoryRows.value = []
   suggestions.value = []
   entities.value = []
   clients.value = []
   clientRows.value = []
+  categoryPagination.value = emptyPagination()
+  suggestionPagination.value = emptyPagination()
+  entityPagination.value = emptyPagination()
+  clientPagination.value = emptyPagination()
+  entityClienteId.value = null
   password.value = ''
 }
 
@@ -304,6 +310,7 @@ function openCategoryDialog(category = null) {
 }
 
 async function submitCategory() {
+  if (isSaving.value) return
   await runAction(async () => {
     await saveCategory(categoryDraft.value)
     categoryDialog.value = false
@@ -339,6 +346,7 @@ function openSuggestionDialog(suggestion = null) {
 }
 
 async function submitSuggestion() {
+  if (isSaving.value) return
   await runAction(async () => {
     await saveSuggestion({
       ...suggestionDraft.value,
@@ -388,6 +396,7 @@ async function resolveDraftClient(draft) {
 }
 
 async function submitEntity() {
+  if (isSaving.value) return
   const isEditing = Boolean(entityDraft.value.id)
   let createdUrl = ''
   await runAction(async () => {
@@ -422,6 +431,7 @@ function openClientDialog(client = null) {
 }
 
 async function submitClient() {
+  if (isSaving.value) return
   await runAction(async () => {
     await saveClient(clientDraft.value)
     clientDialog.value = false
@@ -435,6 +445,12 @@ async function removeClient(client) {
   await runAction(async () => {
     await deleteClient(client.id)
     await Promise.all([loadClients(), loadClientOptions()])
+    // Si se estaba filtrando por este cliente, el filtro apuntaría a un id que
+    // ya no existe y la lista de entidades saldría vacía sin explicación.
+    if (entityClienteId.value === client.id) {
+      entityClienteId.value = null
+      await loadEntities()
+    }
     notifySuccess('Cliente eliminado.')
   })
 }
@@ -446,6 +462,7 @@ function openBulkDialog() {
 }
 
 async function submitBulk() {
+  if (isSaving.value) return
   await runAction(async () => {
     const clienteId = await resolveDraftClient(bulkDraft.value)
     const result = await bulkCreateEntities({
@@ -566,6 +583,7 @@ async function generateQrImage(entity) {
 }
 
 async function submitPasswordChange() {
+  if (isSaving.value) return
   const form = securityForm.value
   if (form.newPassword !== form.confirmPassword) {
     notifyError('La confirmación de la nueva contraseña no coincide.')

@@ -18,6 +18,7 @@ import {
 } from './_lib/security.mjs'
 import { getClientIp, getCookie } from './_lib/http.mjs'
 import { normalizeDataType } from '../../src/services/dataTypes.js'
+import { isReservedPath } from '../../src/services/routes.js'
 import { generateUniqueShortCode, generateUniqueShortCodes } from '../../src/services/shortCode.js'
 import {
   CATEGORY_CODE_MAX_LENGTH,
@@ -173,6 +174,12 @@ async function saveCategory(db, category) {
   const code = asBadRequest(() => validateCategoryCode(category.code)).toUpperCase()
   const active = category.active ? 1 : 0
   if (code.length > CATEGORY_CODE_MAX_LENGTH) throw new HttpError(400, `Código no puede superar ${CATEGORY_CODE_MAX_LENGTH} caracteres.`)
+  // Una categoría con un código reservado dejaría su URL larga
+  // (/CODIGO/token) inalcanzable para siempre, porque el enrutador la trata
+  // como una ruta de la aplicación.
+  if (isReservedPath(code)) {
+    throw new HttpError(400, `El código "${code}" está reservado por una ruta de la aplicación.`)
+  }
 
   if (category.id) {
     const categoryId = validId(category.id, 'categoría')
