@@ -402,6 +402,8 @@ try {
   const deactivated = await request('entity', 'context', { query: { token: moto1.shortCode } })
   assert(!deactivated.auth.canRequestCode && !deactivated.auth.authorized,
     'Un cliente desactivado debe dejar sus fichas en solo lectura.')
+  assert(deactivated.auth.emailHint === '',
+    'Un cliente desactivado no debe publicar ni la pista de su correo.')
 
   // --- Límites de la creación masiva -------------------------------------
   await expectStatus(() => request('admin', 'bulk-create-entities', {

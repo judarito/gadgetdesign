@@ -128,7 +128,9 @@ async function getContext(request, route, forceAuthorized = false) {
       authorized,
       scope,
       canRequestCode: Boolean(cliente?.email && cliente.active),
-      emailHint: maskEmail(cliente?.email),
+      // El correo enmascarado del dueño no se publica si el cliente está
+      // desactivado: la ficha queda en solo lectura y la pista no aporta nada.
+      emailHint: cliente?.active ? maskEmail(cliente.email) : '',
     },
   }
 }
