@@ -102,6 +102,21 @@ if (!localEntityColumns.rows.some((column) => column.name === 'clienteID')) {
   await db.execute('ALTER TABLE Entidades ADD COLUMN clienteID INTEGER REFERENCES Clientes (id)')
 }
 
+// La base local es un entorno de pruebas desechable, así que se vacía antes de
+// sembrar los datos: el resultado debe ser siempre el mismo para que la suite
+// de integración pueda ejecutarse dos veces seguidas sin chocar con lo que
+// dejó la ejecución anterior.
+await db.batch([
+  'DELETE FROM EntityAccessCodes',
+  'DELETE FROM ClientAccessCodes',
+  'DELETE FROM EntityAliases',
+  'DELETE FROM Entidades',
+  'DELETE FROM CategoriaSugerencias',
+  'DELETE FROM Clientes',
+  'DELETE FROM Categorias',
+  'DELETE FROM AdminLoginAttempts',
+], 'write')
+
 await db.execute(`INSERT OR IGNORE INTO Categorias (id, name, active, code)
                   VALUES (1, 'Vehículos', 1, 'VEH')`)
 await db.batch([
@@ -141,10 +156,6 @@ await db.execute({
           clienteID = excluded.clienteID`,
   args: [sampleData],
 })
-
-await db.execute('DELETE FROM EntityAccessCodes')
-await db.execute('DELETE FROM ClientAccessCodes')
-await db.execute('DELETE FROM AdminLoginAttempts')
 
 await applyDataIntegrityConstraints(db)
 

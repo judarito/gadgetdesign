@@ -420,21 +420,42 @@ Se amplía `scripts/testFunctions.mjs`, que hoy cubre 9 casos:
   dejan de servir.
 - Borrar un cliente con fichas devuelve 409.
 - Un cliente con `active = 0` deja sus fichas en solo lectura.
-- Creación masiva: 100 fichas, identificaciones y códigos cortos únicos, y un
-  rango con colisiones que no inserta nada.
+- Creación masiva: 100 fichas, identificaciones y códigos cortos únicos
+  (comprobados en dos páginas de 50), un rango con colisiones que no inserta
+  nada, un rango mayor que el límite y un prefijo demasiado largo.
+- Un correo suelto sin `clienteId` crea el cliente y guarda su celular (vía de
+  compatibilidad).
+- Las columnas heredadas `owner_*` ya no existen en la base.
 - Lectura desde el portal **no** recibe la respuesta anónima cacheada (§5).
 
 ---
 
 ## 10. Fases
 
-| Fase | Contenido | Riesgo |
-| --- | --- | --- |
-| **1** | Tabla `Clientes` + migración + triggers + CRUD en el panel + selector en la ficha + creación masiva + autorización por pertenencia. La página pública no cambia de aspecto | Bajo, aditivo |
-| **2** | `/portal`: OTP de cliente, listado agrupado, enlaces a las fichas desbloqueadas, arreglo de caché y de rutas reservadas | Medio |
-| **3** | Dejar de escribir `owner_*`, eliminar sus columnas, triggers y comprobaciones | Medio |
+| Fase | Contenido | Riesgo | Estado |
+| --- | --- | --- | --- |
+| **1** | Tabla `Clientes` + migración + triggers + CRUD en el panel + selector en la ficha + creación masiva + autorización por pertenencia. La página pública no cambia de aspecto | Bajo, aditivo | Implementada y verificada en el entorno de pruebas |
+| **2** | `/portal`: OTP de cliente, listado agrupado, enlaces a las fichas desbloqueadas, arreglo de caché y de rutas reservadas | Medio | Implementada y verificada en el entorno de pruebas |
+| **3** | Dejar de escribir `owner_*` y eliminar sus columnas, triggers y comprobaciones | Medio | Implementada. La eliminación de columnas es el paso explícito `setup:drop-legacy` |
 
-Cada fase es un PR por el circuito `dev` → `main`.
+Las tres fases viajan en un solo PR por el circuito `dev` → `main`, porque el
+código de la fase 3 no puede convivir con el de la fase 1: o el dueño se escribe
+en dos sitios, o solo en `Clientes`.
+
+### Diferencias con lo diseñado
+
+- **La sesión de ficha no se revoca por ficha.** Al mudarse `auth_version` a
+  `Clientes`, regenerar el token de una ficha ya no corta las sesiones abiertas:
+  corta el acceso porque la ruta anterior deja de resolver. Está comentado en
+  `regenerateEntity`.
+- **`Entidades.auth_version` sobrevive como columna muerta.** Es `NOT NULL` y los
+  triggers la validan, pero ya no se usa para autorizar. Se deja para no encadenar
+  otra migración destructiva en el mismo PR.
+- **La vía de compatibilidad se mantiene.** `create-entity` sigue aceptando un
+  `ownerEmail` suelto: si no existe un cliente con ese correo, lo crea. Es lo que
+  usaba el formulario anterior y evita romper a cualquier consumidor de la API.
+- **El servicio `getClientIp` y el límite de datos personalizados** dejan de estar
+  duplicados en tres archivos: viven en `_lib/http.mjs` y en `services/customData.js`.
 
 ## 11. Riesgos
 

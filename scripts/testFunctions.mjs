@@ -344,6 +344,39 @@ try {
   assert(!deactivated.auth.canRequestCode && !deactivated.auth.authorized,
     'Un cliente desactivado debe dejar sus fichas en solo lectura.')
 
+  // --- Límites de la creación masiva -------------------------------------
+  await expectStatus(() => request('admin', 'bulk-create-entities', {
+    method: 'POST', cookie: adminCookie,
+    body: { categoryId: motoCategoryId, clienteId: 1, prefix: 'X-', from: 1, to: 201, pad: 3 },
+  }), 400, 'La creación masiva debe rechazar un rango mayor que el límite.')
+
+  await expectStatus(() => request('admin', 'bulk-create-entities', {
+    method: 'POST', cookie: adminCookie,
+    body: {
+      categoryId: motoCategoryId, clienteId: 1,
+      prefix: 'X'.repeat(151), from: 1, to: 2, pad: 3,
+    },
+  }), 400, 'La creación masiva debe rechazar un prefijo demasiado largo.')
+
+  // El lote grande ejercita la generación de códigos cortos en bloque, que es
+  // el único camino que se comporta distinto a escala.
+  const bigBulk = await request('admin', 'bulk-create-entities', {
+    method: 'POST', cookie: adminCookie,
+    body: { categoryId: motoCategoryId, clienteId: 1, prefix: 'LOTE-', from: 1, to: 100, pad: 3 },
+  })
+  assert(bigBulk.created === 100 && bigBulk.first === 'LOTE-001' && bigBulk.last === 'LOTE-100',
+    'La creación masiva debe generar cien fichas de una vez.')
+
+  const firstPage = await request('admin', 'entities', {
+    cookie: adminCookie, query: { search: 'LOTE-', pageSize: 50, page: 1 },
+  })
+  const secondPage = await request('admin', 'entities', {
+    cookie: adminCookie, query: { search: 'LOTE-', pageSize: 50, page: 2 },
+  })
+  const codes = new Set([...firstPage.items, ...secondPage.items].map((item) => item.shortCode))
+  assert(firstPage.total === 100, 'Las cien fichas del lote deben existir y paginarse en dos páginas.')
+  assert(codes.size === 100, 'Los cien códigos cortos deben ser únicos.')
+
   await expectStatus(() => request('entity', 'delete-entity', {
     method: 'DELETE', cookie: entityCookie,
     body: { ...route, confirmation: 'IDENTIFICADOR INCORRECTO' },
