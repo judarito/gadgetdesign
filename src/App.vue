@@ -26,7 +26,7 @@ import {
 } from './services/entityApi'
 import {
   CUSTOM_DATA_KEY_MAX_LENGTH,
-  IDENTIFICATION_MAX_LENGTH,
+  CUSTOM_DATA_VALUE_MAX_LENGTH,
 } from './services/validation'
 import { CUSTOM_DATA_TYPES, formatCustomDataValue, getDataType } from './services/dataTypes'
 
@@ -61,7 +61,7 @@ const canUseCrud = computed(() =>
   routeContext.isValid && auth.value.authorized && !isLoading.value && !isSaving.value,
 )
 const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
-const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
+const identifierText = computed(() => entity.value?.displayName || 'Sin datos')
 const categoryCopy = computed(() => getCategoryCopy(category.value))
 const helperText = computed(() => {
   if (isAtCustomDataLimit.value) return `Límite alcanzado: ${CUSTOM_DATA_LIMIT} datos personalizados.`
@@ -521,8 +521,8 @@ function getCategoryCopy(currentCategory) {
   }
 
   return {
-    title: 'Datos de tu identificación',
-    newData: 'Puedes agregar un nuevo dato a esta identificación.',
+    title: 'Datos de esta ficha',
+    newData: 'Puedes agregar un nuevo dato a esta ficha.',
   }
 }
 </script>
@@ -716,7 +716,7 @@ function getCategoryCopy(currentCategory) {
                       v-model="selectedSuggestion.value"
                       :type="getDataType(selectedSuggestion.dataType).inputType"
                       :disabled="!canUseCrud"
-                      :maxlength="IDENTIFICATION_MAX_LENGTH"
+                      :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                       :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
                       aria-label="Valor del dato sugerido"
                       @pointerdown.capture="openDatePicker($event, selectedSuggestion.dataType)"
@@ -798,7 +798,7 @@ function getCategoryCopy(currentCategory) {
                         v-model="draft.value"
                         :type="getDataType(draft.dataType).inputType"
                         :disabled="!canUseCrud"
-                        :maxlength="IDENTIFICATION_MAX_LENGTH"
+                        :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                         :placeholder="getDataType(draft.dataType).placeholder"
                         aria-label="Valor personalizado"
                         @pointerdown.capture="openDatePicker($event, draft.dataType)"
@@ -979,7 +979,7 @@ function getCategoryCopy(currentCategory) {
                 v-model="newDraft.value"
                 :type="getDataType(newDraft.dataType).inputType"
                 :disabled="!canUseCrud"
-                :maxlength="IDENTIFICATION_MAX_LENGTH"
+                :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                 :placeholder="getDataType(newDraft.dataType).placeholder"
                 @pointerdown.capture="openDatePicker($event, newDraft.dataType)"
               />
@@ -1113,7 +1113,7 @@ function getCategoryCopy(currentCategory) {
           <span>Identificador de la ficha</span>
           <input
             v-model="deleteEntityConfirmation"
-            :maxlength="IDENTIFICATION_MAX_LENGTH"
+            :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
             autocomplete="off"
             :placeholder="identifierText"
           />
