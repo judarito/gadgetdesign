@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 const expectedHost = 'gadgetdesign-dev.netlify.app'
+const targetURL = process.env.E2E_BASE_URL || `https://${expectedHost}`
 const adminPassword = process.env.DEV_ADMIN_PASSWORD || ''
 
-test.beforeEach(async ({ page }) => {
-  const host = new URL(page.context()._options?.baseURL || process.env.E2E_BASE_URL || `https://${expectedHost}`).host
+test.beforeAll(() => {
+  const host = new URL(targetURL).host
   if (host !== expectedHost) {
     throw new Error(`E2E bloqueado: solo puede ejecutarse contra ${expectedHost}, no contra ${host}.`)
   }
