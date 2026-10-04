@@ -51,7 +51,7 @@ import {
   updateEntity,
   verifyAdminPassword,
 } from './services/adminApi'
-import { CATEGORY_CODE_MAX_LENGTH, IDENTIFICATION_MAX_LENGTH } from './services/validation'
+import { CATEGORY_CODE_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from './services/validation'
 import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
@@ -378,7 +378,7 @@ function openEntityDialog(entity = null) {
 /**
  * Resuelve el cliente elegido en el formulario. La opción "nuevo" crea el
  * cliente primero y deja su id en el borrador: si después falla el guardado de
- * la ficha (una identificación duplicada, por ejemplo), el reintento reutiliza
+ * la ficha (un nombre visible repetido, por ejemplo), el reintento reutiliza
  * el cliente en vez de intentar crearlo otra vez y chocar con un 409.
  */
 async function resolveDraftClient(draft) {
@@ -491,7 +491,7 @@ async function regenerateToken(entity) {
 }
 
 async function removeEntity(entity) {
-  if (!window.confirm(`¿Eliminar la entidad “${entity.identification}”?`)) return
+  if (!window.confirm(`¿Eliminar la entidad “${entity.displayName}”?`)) return
   await runAction(async () => {
     await deleteEntity(entity.id)
     await loadEntities()
@@ -543,7 +543,7 @@ async function downloadPrintSvg() {
     })
     downloadBlob(
       new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
-      `qr-${safeFileName(printEntity.value.identification)}-${printSettings.value.qrSizeMm}mm.svg`,
+      `qr-${safeFileName(printEntity.value.displayName)}-${printSettings.value.qrSizeMm}mm.svg`,
     )
     notifySuccess('QR descargado como SVG compatible con laminadores.')
   })
@@ -556,7 +556,7 @@ async function downloadPrintStl() {
     const stl = createPrintableQrStl(buildEntityUrl(printEntity.value), printSettings.value)
     downloadBlob(
       new Blob([stl], { type: 'model/stl' }),
-      `${printSettings.value.format}-${safeFileName(printEntity.value.identification)}.stl`,
+      `${printSettings.value.format}-${safeFileName(printEntity.value.displayName)}.stl`,
     )
     notifySuccess('Modelo STL generado y descargado.')
   })
@@ -687,7 +687,7 @@ function emptyClient() {
 function emptyEntity(categoryId = null) {
   return {
     id: null,
-    identification: '',
+    displayName: '',
     categoryId,
     token: '',
     shortCode: '',
@@ -947,7 +947,7 @@ function emptyPagination() {
               </label>
               <label class="filter-field search-field">
                 <span>Buscar</span>
-                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Identificación, código o cliente" /></div>
+                <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Nombre visible, código o cliente" /></div>
               </label>
               <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Filtrar</v-btn>
             </form>
@@ -959,7 +959,7 @@ function emptyPagination() {
                 <div class="entity-identity">
                   <span class="cell-icon"><Users :size="18" /></span>
                   <div>
-                    <strong>{{ entity.identification }}</strong>
+                    <strong>{{ entity.displayName }}</strong>
                     <span>{{ entity.categoryName }} · {{ entity.categoryCode }}</span>
                     <span v-if="entity.clientName">{{ entity.clientName }} · {{ entity.clientEmail }}</span>
                     <span v-else class="muted-note">Sin cliente asignado</span>
@@ -1094,7 +1094,7 @@ function emptyPagination() {
       <v-card class="admin-dialog">
         <div class="dialog-header"><div><Users :size="21" /><h2>{{ entityDraft.id ? 'Editar entidad' : 'Nueva entidad' }}</h2></div><button type="button" @click="entityDialog = false"><X :size="21" /></button></div>
         <form @submit.prevent="submitEntity">
-          <label class="field"><span>Identificación</span><input v-model="entityDraft.identification" :maxlength="IDENTIFICATION_MAX_LENGTH" placeholder="Ej. ABC-123" /></label>
+          <label class="field"><span>Nombre visible</span><input v-model="entityDraft.displayName" :maxlength="DISPLAY_NAME_MAX_LENGTH" placeholder="Ej. Max, ABC-123 o Maleta azul" /></label>
           <label class="field"><span>Categoría</span><select v-model="entityDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
           <label class="field">
             <span>Cliente <small>Opcional</small></span>
@@ -1176,9 +1176,9 @@ function emptyPagination() {
           <button type="button" aria-label="Cerrar" @click="qrDialog = false"><X :size="21" /></button>
         </div>
         <div v-if="qrEntity" class="qr-content">
-          <img :src="qrImageUrl" :alt="`Código QR de ${qrEntity.identification}`" />
+          <img :src="qrImageUrl" :alt="`Código QR de ${qrEntity.displayName}`" />
           <div>
-            <strong>{{ qrEntity.identification }}</strong>
+            <strong>{{ qrEntity.displayName }}</strong>
             <a :href="buildEntityUrl(qrEntity)" target="_blank">{{ buildEntityUrl(qrEntity) }}</a>
           </div>
           <v-btn color="primary" variant="flat" @click="openPrintDialog(qrEntity)">
