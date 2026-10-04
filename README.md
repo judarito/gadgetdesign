@@ -224,6 +224,37 @@ local:
 npm run test:functions
 ```
 
+### E2E contra Netlify dev
+
+Cada push a `dev` ejecuta el workflow `.github/workflows/e2e-dev.yml`. Primero
+compila y ejecuta las pruebas de Functions. Después espera a que
+`https://gadgetdesign-dev.netlify.app/build-info.json` reporte exactamente el
+mismo `GITHUB_SHA` que disparó el workflow, evitando probar por error el deploy
+anterior.
+
+Los E2E usan Playwright y están bloqueados para ejecutarse únicamente contra
+`gadgetdesign-dev.netlify.app`. La prueba administrativa crea dos fichas con el
+mismo `displayName`, comprueba que reciben URLs públicas distintas, abre ambas
+fichas y elimina los datos de prueba al terminar.
+
+GitHub Actions requiere este secreto del repositorio:
+
+```txt
+DEV_ADMIN_PASSWORD
+```
+
+Debe contener solamente la contraseña administrativa del entorno de pruebas.
+Nunca uses la contraseña de producción.
+
+Para ejecutar los E2E manualmente desde una máquina de desarrollo:
+
+```sh
+npm install --no-save --package-lock=false @playwright/test@1.55.0
+npx playwright install chromium
+E2E_BASE_URL=https://gadgetdesign-dev.netlify.app \
+DEV_ADMIN_PASSWORD='...' npm run test:e2e
+```
+
 No uses `netlify deploy --prod` desde tu equipo: publica el contenido local
 saltándose la revisión del PR que protege `main`. El despliegue normal es un
 `git push` a la rama correspondiente.
