@@ -541,7 +541,7 @@ async function updateEntity(db, payload) {
   const id = validId(payload.id, 'entidad')
   const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
-    const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
+  const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
   if (!current.rows[0]) throw new HttpError(404, 'No se encontró la entidad.')
 
   const previousClientId = current.rows[0].clienteID === null ? null : Number(current.rows[0].clienteID)
@@ -670,9 +670,6 @@ function asDatabaseError(error) {
   if (error instanceof HttpError) return error
 
   const message = String(error?.message || '')
-  if (message.includes('idx_entidades_identification_normalized')) {
-    return new HttpError(409, 'Ya existe una entidad con esa nombre visible.')
-  }
   if (message.includes('idx_suggestions_name_normalized') || message.includes('CategoriaSugerencias.categoriaID')) {
     return new HttpError(409, 'Esta categoría ya tiene una sugerencia con ese nombre.')
   }
