@@ -297,10 +297,10 @@ POST admin?action=bulk-create-entities
 { categoriaID, clienteId, prefix: "VACA-", from: 1, to: 100, pad: 3 }
 ```
 
-- Identificación resultante: `VACA-001` … `VACA-100`.
+- Nombre visible resultante: `VACA-001` … `VACA-100`.
 - Límite por lote (p. ej. 200) para no agotar el tiempo de la Function.
 - **Se validan las colisiones antes de insertar**: una sola consulta comprueba
-  todas las identificaciones del rango y, si alguna existe, se aborta indicando
+  todas las nombres visibles del rango y, si alguna existe, se aborta indicando
   cuáles. No se inserta nada a medias.
 - Los `short_code` se generan en memoria y se comprueban en bloque, en lugar de
   una consulta por ficha como hace `generateUniqueShortCode`.
@@ -350,7 +350,7 @@ Ver [Caché de las lecturas públicas](../README.md#caché-de-las-lecturas-públ
 - **Filtro por cliente** en la vista de entidades, y la búsqueda incluye su
   nombre y correo.
 - **Diálogo de creación masiva**: categoría, cliente, prefijo, rango, tamaño de
-  relleno, vista previa de la primera y la última identificación, y el total.
+  relleno, vista previa de la primera y la último nombre visible, y el total.
 
 ### Portal del cliente (nuevo `ClientApp.vue`)
 
@@ -432,7 +432,7 @@ Se amplía `scripts/testFunctions.mjs`, que hoy cubre 9 casos:
   dejan de servir.
 - Borrar un cliente con fichas devuelve 409.
 - Un cliente con `active = 0` deja sus fichas en solo lectura.
-- Creación masiva: 100 fichas, identificaciones y códigos cortos únicos
+- Creación masiva: 100 fichas, nombres visibles y códigos cortos técnicos únicos
   (comprobados en dos páginas de 50), un rango con colisiones que no inserta
   nada, un rango mayor que el límite y un prefijo demasiado largo.
 - Un correo suelto sin `clienteId` crea el cliente y guarda su celular (vía de
@@ -511,3 +511,10 @@ inválido, y los contadores de paginación no unen `Categorias` mientras la list
 | El despliegue va antes que la migración | La migración es aditiva; se aplica antes. El código nuevo falla claro si falta la tabla |
 | Un cliente con muchas fichas ralentiza el portal | Paginación en `context` desde el principio |
 | Duplicar el editor de datos en el portal | No se duplica: el portal enlaza a la ficha (§6) |
+
+
+## Nombre visible de la ficha
+
+El campo histórico `Entidades.Identificacion` se conserva temporalmente como nombre físico de columna para evitar una migración destructiva adicional, pero en la API y en la interfaz se expone como `displayName`.
+
+No es una clave de negocio y puede repetirse entre fichas. La identidad técnica continúa en `id`, `token` y `short_code`, que sí son únicos. La migración elimina el índice único `idx_entidades_identification_normalized`, pero mantiene las validaciones de longitud, espacios e invisibles.
