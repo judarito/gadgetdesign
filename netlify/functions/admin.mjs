@@ -455,6 +455,7 @@ async function listEntities(db, params) {
 }
 
 async function createEntity(db, payload) {
+  await ensureDisplayNameIsNonUnique(db)
   const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
   const cliente = await resolveClient(db, payload)
@@ -474,6 +475,7 @@ async function createEntity(db, payload) {
  * cabezas. Valida las colisiones del lote completo antes de insertar nada.
  */
 async function bulkCreateEntities(db, payload) {
+  await ensureDisplayNameIsNonUnique(db)
   const categoryId = validId(payload.categoryId, 'categoría')
   const cliente = await resolveClient(db, payload)
   const prefix = sanitizeText(payload.prefix)
@@ -526,6 +528,7 @@ async function bulkCreateEntities(db, payload) {
 }
 
 async function updateEntity(db, payload) {
+  await ensureDisplayNameIsNonUnique(db)
   const id = validId(payload.id, 'entidad')
   const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
@@ -635,6 +638,12 @@ function validatePassword(value) {
   return password
 }
 
+
+async function ensureDisplayNameIsNonUnique(db) {
+  // Migración idempotente para bases que todavía conservan la antigua regla:
+  // Identificacion era única, pero ahora representa solo el nombre visible.
+  await db.execute('DROP INDEX IF EXISTS idx_entidades_identification_normalized')
+}
 
 async function generateUniqueToken(db) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
