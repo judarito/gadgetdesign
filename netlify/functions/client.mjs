@@ -93,7 +93,7 @@ async function buildContext(db, cliente, params) {
   const page = clamp(Number.parseInt(params.get('page'), 10) || 1, 1, totalPages)
 
   const result = await db.execute({
-    sql: `SELECT e.id, e.Identificacion AS identificacion, e.short_code, e.custom_data,
+    sql: `SELECT e.id, e.Identificacion AS display_name, e.short_code, e.custom_data,
                  c.id AS category_id, c.name AS category_name, c.code AS category_code
           FROM Entidades e
           INNER JOIN Categorias c ON c.id = e.categoriaID
@@ -275,7 +275,7 @@ function mapEntity(row) {
   const customData = parseCustomData(row.custom_data)
   return {
     id: Number(row.id),
-    identificacion: String(row.identificacion),
+    displayName: String(row.display_name),
     shortCode: String(row.short_code || ''),
     categoryId: Number(row.category_id),
     categoryName: String(row.category_name),
