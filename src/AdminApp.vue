@@ -378,7 +378,7 @@ function openEntityDialog(entity = null) {
 /**
  * Resuelve el cliente elegido en el formulario. La opción "nuevo" crea el
  * cliente primero y deja su id en el borrador: si después falla el guardado de
- * la ficha (un nombre visible repetido, por ejemplo), el reintento reutiliza
+ * la ficha, el reintento reutiliza
  * el cliente en vez de intentar crearlo otra vez y chocar con un 409.
  */
 async function resolveDraftClient(draft) {
@@ -403,7 +403,7 @@ async function submitEntity() {
     const clienteId = await resolveDraftClient(entityDraft.value)
     const payload = {
       id: entityDraft.value.id,
-      identification: entityDraft.value.identification,
+      displayName: entityDraft.value.displayName,
       categoryId: entityDraft.value.categoryId,
       clienteId,
     }
@@ -1198,7 +1198,7 @@ function emptyPagination() {
           <div class="print-summary">
             <div>
               <span>Entidad</span>
-              <strong>{{ printEntity.identification }}</strong>
+              <strong>{{ printEntity.displayName }}</strong>
             </div>
             <div>
               <span>Impresora</span>
