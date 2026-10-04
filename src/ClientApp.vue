@@ -263,7 +263,7 @@ function showToast(message, color = 'success') {
             <span class="sr-only">Buscar ficha</span>
             <div class="portal-search-field">
               <Search :size="18" />
-              <input v-model="search" maxlength="200" placeholder="Buscar por identificación" />
+              <input v-model="search" maxlength="200" placeholder="Buscar por nombre visible" />
               <button v-if="search" type="button" aria-label="Limpiar búsqueda" @click="clearSearch">
                 <X :size="16" />
               </button>
@@ -285,7 +285,7 @@ function showToast(message, color = 'success') {
             <div class="portal-item-info">
               <span class="portal-item-icon"><Package :size="18" /></span>
               <div>
-                <strong>{{ item.identificacion }}</strong>
+                <strong>{{ item.displayName }}</strong>
                 <span>
                   {{ item.dataCount }} {{ item.dataCount === 1 ? 'dato' : 'datos' }}
                   <template v-if="item.protectedCount"> · {{ item.protectedCount }} protegido</template>
