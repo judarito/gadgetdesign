@@ -472,7 +472,7 @@ async function createEntity(db, payload) {
 
 /**
  * Crea un rango de fichas de una vez, para el caso de la finca con muchas
- * cabezas. Valida las colisiones del lote completo antes de insertar nada.
+ * cabezas. Los nombres visibles pueden repetirse; la identidad técnica sigue en id/token/short_code.
  */
 async function bulkCreateEntities(db, payload) {
   await ensureDisplayNameIsNonUnique(db)
