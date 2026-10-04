@@ -115,7 +115,7 @@ async function getContext(request, route, forceAuthorized = false) {
     category,
     entity: {
       id: entity.id,
-      identificacion: entity.identificacion,
+      displayName: entity.displayName,
       shortCode: entity.shortCode,
       customData: exposeCustomData(entity.customData, authorized),
     },
@@ -171,7 +171,7 @@ async function requestCode(request, payload) {
     await sendAccessCode({
       to: cliente.email,
       code,
-      identification: entity.identificacion,
+      identification: entity.displayName,
     })
   } catch (error) {
     if (insertedCode.lastInsertRowid !== undefined) {
@@ -285,7 +285,7 @@ async function deleteCurrentEntity(request, payload) {
   requireEntitySession(request, entity, cliente)
 
   const confirmation = String(payload.confirmation || '').trim()
-  if (confirmation !== entity.identificacion.trim()) {
+  if (confirmation !== entity.displayName.trim()) {
     throw new HttpError(400, 'Escribe el identificador exactamente como aparece en la ficha.')
   }
 
@@ -344,7 +344,7 @@ async function findEntity(db, route) {
     ? [safeToken, safeToken, safeToken, safeCategory]
     : [safeToken, safeToken, safeToken]
   const result = await db.execute({
-    sql: `SELECT DISTINCT e.id, e.Identificacion AS identificacion, e.token,
+    sql: `SELECT DISTINCT e.id, e.Identificacion AS display_name, e.token,
                  e.short_code, e.categoriaID, e.custom_data,
                  e.auth_version, e.clienteID,
                  c.id AS category_id, c.name AS category_name,
@@ -367,7 +367,7 @@ async function findEntity(db, route) {
   return {
     entity: {
       id: Number(row.id),
-      identificacion: String(row.identificacion),
+      displayName: String(row.display_name),
       token: String(row.token),
       shortCode: String(row.short_code || ''),
       categoriaID: Number(row.categoriaID),
