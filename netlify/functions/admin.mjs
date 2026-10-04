@@ -497,13 +497,13 @@ async function bulkCreateEntities(db, payload) {
     throw new HttpError(400, `No se pueden crear más de ${BULK_ENTITY_LIMIT} fichas de una vez.`)
   }
 
-  const identifications = []
+  const displayNames = []
   for (let value = from; value <= to; value += 1) {
     const displayName = `${prefix}${String(value).padStart(pad, '0')}`
     if (displayName.length > DISPLAY_NAME_MAX_LENGTH) {
-      throw new HttpError(400, `La nombre visible "${displayName}" supera ${DISPLAY_NAME_MAX_LENGTH} caracteres.`)
+      throw new HttpError(400, `El nombre visible "${displayName}" supera ${DISPLAY_NAME_MAX_LENGTH} caracteres.`)
     }
-    identifications.push(displayName)
+    displayNames.push(displayName)
   }
 
   const placeholders = identifications.map(() => '?').join(', ')
@@ -518,8 +518,8 @@ async function bulkCreateEntities(db, payload) {
     throw new HttpError(409, `Ya existen ${clash.rows.length} identificaciones en ese rango: ${shown.join(', ')}${extra}.`)
   }
 
-  const shortCodes = await generateUniqueShortCodes(db, identifications.length)
-  const rows = identifications.map((displayName, index) => ({
+  const shortCodes = await generateUniqueShortCodes(db, displayNames.length)
+  const rows = displayNames.map((displayName, index) => ({
     sql: `INSERT INTO Entidades
           (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID)
           VALUES (?, ?, ?, ?, '[]', 1, ?)`,
@@ -531,8 +531,8 @@ async function bulkCreateEntities(db, payload) {
   return json({
     ok: true,
     created: rows.length,
-    first: identifications[0],
-    last: identifications[identifications.length - 1],
+    first: displayNames[0],
+    last: displayNames[displayNames.length - 1],
     clienteId: cliente?.id ?? null,
   })
 }
