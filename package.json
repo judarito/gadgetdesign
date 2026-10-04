@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "setup:local": "node scripts/setupLocal.mjs",
     "test:functions": "npm run setup:local && node scripts/testFunctions.mjs",
+    "test:e2e": "npx --yes @playwright/test@1.55.0 test",
     "setup:admin": "node scripts/setupAdmin.mjs",
     "setup:drop-legacy": "node scripts/dropLegacyOwnerColumns.mjs"
   },
