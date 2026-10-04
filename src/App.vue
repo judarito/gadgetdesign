@@ -560,7 +560,7 @@ function getCategoryCopy(currentCategory) {
           </div>
 
           <v-sheet class="id-card" rounded="xl" border :aria-busy="isLoading">
-            <h2>Identificador</h2>
+            <h2>Nombre visible</h2>
             <div v-if="isLoading" class="identifier-pill identifier-pill--skeleton" aria-hidden="true">
               <span class="skeleton skeleton-tag" />
               <span class="skeleton skeleton-identifier" />
@@ -1058,7 +1058,7 @@ function getCategoryCopy(currentCategory) {
         <div class="privacy-list">
           <div>
             <strong>Qué se guarda</strong>
-            <span>El identificador, los datos de contacto del responsable y los datos personalizados de la ficha.</span>
+            <span>El nombre visible, los datos de contacto del responsable y los datos personalizados de la ficha.</span>
           </div>
           <div>
             <strong>Datos protegidos</strong>
@@ -1110,7 +1110,7 @@ function getCategoryCopy(currentCategory) {
           Para confirmar, escribe <strong>{{ identifierText }}</strong>.
         </p>
         <label class="confirmation-field">
-          <span>Identificador de la ficha</span>
+          <span>Nombre visible de la ficha</span>
           <input
             v-model="deleteEntityConfirmation"
             :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
