@@ -1,0 +1,54 @@
+name: Validate dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:functions
+
+  deployed-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for Netlify dev deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://gadgetdesign-dev.netlify.app"
+          for attempt in {1..30}; do
+            body="$(curl -fsS "$base/.netlify/functions/admin?action=session" 2>/dev/null || true)"
+            if echo "$body" | grep -q '"authenticated"'; then
+              echo "Dev Functions are responding."
+              exit 0
+            fi
+            echo "Waiting for dev deployment ($attempt/30)..."
+            sleep 10
+          done
+          echo "Dev deployment did not become ready in time."
+          exit 1
+
+      - name: Smoke test public routes and portal anti-enumeration
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://gadgetdesign-dev.netlify.app"
+
+          curl -fsS "$base/admin" >/dev/null
+          curl -fsS "$base/portal" >/dev/null
+
+          response="$(curl -fsS -X POST             -H 'content-type: application/json'             --data '{"email":"smoke-nonexistent@example.invalid"}'             "$base/.netlify/functions/client?action=request-code")"
+
+          echo "$response" | grep -q '"ok":true'
