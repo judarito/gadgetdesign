@@ -506,18 +506,6 @@ async function bulkCreateEntities(db, payload) {
     displayNames.push(displayName)
   }
 
-  const placeholders = identifications.map(() => '?').join(', ')
-  const clash = await db.execute({
-    sql: `SELECT Identificacion FROM Entidades
-          WHERE LOWER(TRIM(Identificacion)) IN (${placeholders})`,
-    args: identifications.map((value) => value.toLowerCase()),
-  })
-  if (clash.rows.length) {
-    const shown = clash.rows.slice(0, 5).map((row) => String(row.Identificacion))
-    const extra = clash.rows.length > shown.length ? ` y ${clash.rows.length - shown.length} más` : ''
-    throw new HttpError(409, `Ya existen ${clash.rows.length} identificaciones en ese rango: ${shown.join(', ')}${extra}.`)
-  }
-
   const shortCodes = await generateUniqueShortCodes(db, displayNames.length)
   const rows = displayNames.map((displayName, index) => ({
     sql: `INSERT INTO Entidades
