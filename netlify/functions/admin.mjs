@@ -22,7 +22,7 @@ import { isReservedPath } from '../../src/services/routes.js'
 import { generateUniqueShortCode, generateUniqueShortCodes } from '../../src/services/shortCode.js'
 import {
   CATEGORY_CODE_MAX_LENGTH,
-  IDENTIFICATION_MAX_LENGTH,
+  DISPLAY_NAME_MAX_LENGTH,
   sanitizeText,
   validateCategoryCode,
 } from '../../src/services/validation.js'
@@ -250,7 +250,7 @@ async function listClients(db, params) {
   const search = sanitizeText(params.get('search'))
   if (search) {
     clauses.push(`(c.name LIKE ? OR c.email LIKE ? OR COALESCE(c.phone, '') LIKE ?)`)
-    const pattern = `%${search.slice(0, IDENTIFICATION_MAX_LENGTH)}%`
+    const pattern = `%${search.slice(0, DISPLAY_NAME_MAX_LENGTH)}%`
     args.push(pattern, pattern, pattern)
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
@@ -429,7 +429,7 @@ async function listEntities(db, params) {
   if (search) {
     clauses.push(`(e.Identificacion LIKE ? OR e.token LIKE ? OR e.short_code LIKE ?
                   OR cl.name LIKE ? OR cl.email LIKE ?)`)
-    const pattern = `%${search.slice(0, IDENTIFICATION_MAX_LENGTH)}%`
+    const pattern = `%${search.slice(0, DISPLAY_NAME_MAX_LENGTH)}%`
     args.push(pattern, pattern, pattern, pattern, pattern)
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
@@ -441,7 +441,7 @@ async function listEntities(db, params) {
     params,
   )
   const result = await db.execute({
-    sql: `SELECT e.id, e.Identificacion AS identificacion, e.token, e.short_code,
+    sql: `SELECT e.id, e.Identificacion AS display_name, e.token, e.short_code,
                  e.categoriaID, e.clienteID,
                  cl.name AS client_name, cl.email AS client_email, cl.phone AS client_phone,
                  c.name AS category_name, c.code AS category_code
@@ -455,17 +455,16 @@ async function listEntities(db, params) {
 }
 
 async function createEntity(db, payload) {
-  const identification = requiredText(payload.identification, IDENTIFICATION_MAX_LENGTH, 'Identificación')
+  const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
   const cliente = await resolveClient(db, payload)
-  await ensureUniqueIdentification(db, identification)
-  const token = await generateUniqueToken(db)
+    const token = await generateUniqueToken(db)
   const shortCode = await generateUniqueShortCode(db)
   await db.execute({
     sql: `INSERT INTO Entidades
           (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID)
           VALUES (?, ?, ?, ?, '[]', 1, ?)`,
-    args: [identification, token, shortCode, categoryId, cliente?.id ?? null],
+    args: [displayName, token, shortCode, categoryId, cliente?.id ?? null],
   })
   return json({ token, shortCode, clienteId: cliente?.id ?? null })
 }
@@ -500,11 +499,11 @@ async function bulkCreateEntities(db, payload) {
 
   const identifications = []
   for (let value = from; value <= to; value += 1) {
-    const identification = `${prefix}${String(value).padStart(pad, '0')}`
-    if (identification.length > IDENTIFICATION_MAX_LENGTH) {
-      throw new HttpError(400, `La identificación "${identification}" supera ${IDENTIFICATION_MAX_LENGTH} caracteres.`)
+    const displayName = `${prefix}${String(value).padStart(pad, '0')}`
+    if (displayName.length > DISPLAY_NAME_MAX_LENGTH) {
+      throw new HttpError(400, `La nombre visible "${displayName}" supera ${DISPLAY_NAME_MAX_LENGTH} caracteres.`)
     }
-    identifications.push(identification)
+    identifications.push(displayName)
   }
 
   const placeholders = identifications.map(() => '?').join(', ')
@@ -520,11 +519,11 @@ async function bulkCreateEntities(db, payload) {
   }
 
   const shortCodes = await generateUniqueShortCodes(db, identifications.length)
-  const rows = identifications.map((identification, index) => ({
+  const rows = identifications.map((displayName, index) => ({
     sql: `INSERT INTO Entidades
           (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID)
           VALUES (?, ?, ?, ?, '[]', 1, ?)`,
-    args: [identification, crypto.randomUUID(), shortCodes[index], categoryId, cliente?.id ?? null],
+    args: [displayName, crypto.randomUUID(), shortCodes[index], categoryId, cliente?.id ?? null],
   }))
 
   await db.batch(rows, 'write')
@@ -540,17 +539,16 @@ async function bulkCreateEntities(db, payload) {
 
 async function updateEntity(db, payload) {
   const id = validId(payload.id, 'entidad')
-  const identification = requiredText(payload.identification, IDENTIFICATION_MAX_LENGTH, 'Identificación')
+  const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
-  await ensureUniqueIdentification(db, identification, id)
-  const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
+    const current = await db.execute({ sql: 'SELECT clienteID FROM Entidades WHERE id = ? LIMIT 1', args: [id] })
   if (!current.rows[0]) throw new HttpError(404, 'No se encontró la entidad.')
 
   const previousClientId = current.rows[0].clienteID === null ? null : Number(current.rows[0].clienteID)
 
   // Un PATCH que no menciona al cliente no debe desvincularlo. Solo se cambia si
   // el campo viene, aunque venga como null explícito: así una llamada parcial
-  // (o un consumidor antiguo que solo mande identificación y categoría) no deja
+  // (o un consumidor antiguo que solo mande nombre visible y categoría) no deja
   // la ficha huérfana y en solo lectura sin avisar.
   const touchesClient = 'clienteId' in payload || 'ownerEmail' in payload
   const cliente = touchesClient ? await resolveClient(db, payload) : null
@@ -560,7 +558,7 @@ async function updateEntity(db, payload) {
     sql: `UPDATE Entidades
           SET Identificacion = ?, categoriaID = ?, clienteID = ?
           WHERE id = ?`,
-    args: [identification, categoryId, nextClientId, id],
+    args: [displayName, categoryId, nextClientId, id],
   })
 
   await purgeEntityCache(id)
@@ -600,7 +598,7 @@ async function deleteEntity(db, payload) {
 
 function mapEntity(row) {
   return {
-    id: Number(row.id), identification: String(row.identificacion), token: String(row.token),
+    id: Number(row.id), displayName: String(row.display_name), token: String(row.token),
     shortCode: String(row.short_code || ''), categoryId: Number(row.categoriaID),
     categoryName: String(row.category_name), categoryCode: String(row.category_code),
     clienteId: row.clienteID === null || row.clienteID === undefined ? null : Number(row.clienteID),
@@ -649,15 +647,6 @@ function validatePassword(value) {
   return password
 }
 
-async function ensureUniqueIdentification(db, identification, excludedId = null) {
-  const result = await db.execute({
-    sql: `SELECT 1 FROM Entidades
-          WHERE LOWER(TRIM(Identificacion)) = LOWER(TRIM(?)) AND (? IS NULL OR id <> ?)
-          LIMIT 1`,
-    args: [identification, excludedId, excludedId],
-  })
-  if (result.rows.length) throw new HttpError(409, 'Ya existe una entidad con esa identificación.')
-}
 
 async function generateUniqueToken(db) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -682,7 +671,7 @@ function asDatabaseError(error) {
 
   const message = String(error?.message || '')
   if (message.includes('idx_entidades_identification_normalized')) {
-    return new HttpError(409, 'Ya existe una entidad con esa identificación.')
+    return new HttpError(409, 'Ya existe una entidad con esa nombre visible.')
   }
   if (message.includes('idx_suggestions_name_normalized') || message.includes('CategoriaSugerencias.categoriaID')) {
     return new HttpError(409, 'Esta categoría ya tiene una sugerencia con ese nombre.')
