@@ -37,7 +37,7 @@ try {
 
   const publicResult = await request('entity', 'context', { query: route, includeResponse: true })
   const publicContext = publicResult.data
-  assert(publicContext.entity.identificacion === 'LOCAL-001', 'Debe cargar la entidad local.')
+  assert(publicContext.entity.displayName === 'LOCAL-001', 'Debe cargar la entidad local.')
   const protectedItem = publicContext.entity.customData.find((item) => item.id === 'local-protected')
   assert(protectedItem.masked && protectedItem.value === '', 'El dato protegido debe llegar enmascarado.')
   assert(!('encryptedValue' in protectedItem), 'La API pública no debe exponer el texto cifrado.')
@@ -120,12 +120,14 @@ try {
   const normalizedCategory = await db.execute('SELECT name, code FROM Categorias WHERE id = 1')
   assert(normalizedCategory.rows[0].name === 'Vehículos' && normalizedCategory.rows[0].code === 'VEH',
     'La migración debe conservar categorías normalizadas.')
-  await expectDbFailure(() => db.execute({
+  await db.execute({
     sql: `INSERT INTO Entidades
           (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version)
           VALUES (99, ?, ?, 1, '[]', ?, 1)`,
-    args: ['local-001', '22222222-2222-4222-8222-222222222222', 'Unique99'],
-  }), 'La base debe impedir identificaciones duplicadas sin distinguir mayúsculas.')
+    args: ['LOCAL-001', '22222222-2222-4222-8222-222222222222', 'Unique99'],
+  })
+  await db.execute('DELETE FROM Entidades WHERE id = 99')
+  assert(true, 'La base debe permitir nombres visibles repetidos.')
   await expectDbFailure(() => db.execute({
     sql: 'UPDATE Categorias SET name = ? WHERE id = 1',
     args: ['Vehículos\t'],
@@ -189,10 +191,12 @@ try {
   assert(adminCookie, 'El login administrativo debe crear una cookie segura.')
   const entities = await request('admin', 'entities', { cookie: adminCookie })
   assert(entities.items[0].clientEmail === 'cliente@example.com', 'El administrador debe recibir los datos de contacto.')
-  await expectStatus(() => request('admin', 'create-entity', {
+  const repeatedName = await request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
-    body: { identification: 'local-001', categoryId: 1, clienteId: null },
-  }), 409, 'No debe permitir identificaciones duplicadas.')
+    body: { displayName: 'LOCAL-001', categoryId: 1, clienteId: null },
+  })
+  assert(typeof repeatedName.shortCode === 'string',
+    'La API debe permitir nombres visibles repetidos.')
 
   // --- Modelo de clientes -------------------------------------------------
   const clients = await request('admin', 'clients', { cookie: adminCookie })
@@ -208,7 +212,7 @@ try {
   const implicit = await request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
     body: {
-      identification: 'IMPLICITA-01',
+      displayName: 'IMPLICITA-01',
       categoryId: 1,
       ownerName: 'Dueño Implícito',
       ownerEmail: 'implicito@example.com',
@@ -253,26 +257,28 @@ try {
   assert(bulk.created === 3 && bulk.first === 'MOTO-001' && bulk.last === 'MOTO-003',
     'La creación masiva debe generar todo el rango.')
 
-  await expectStatus(() => request('admin', 'bulk-create-entities', {
+  const repeatedBulk = await request('admin', 'bulk-create-entities', {
     method: 'POST', cookie: adminCookie,
     body: { categoryId: motoCategoryId, clienteId: newClient.id, prefix: 'MOTO-', from: 3, to: 5, pad: 3 },
-  }), 409, 'La creación masiva debe abortar si el rango pisa identificaciones existentes.')
+  })
+  assert(repeatedBulk.created === 3,
+    'La creación masiva debe permitir nombres visibles repetidos.')
 
   const clientEntities = await request('admin', 'entities', {
     cookie: adminCookie, query: { clienteId: newClient.id, pageSize: 50 },
   })
-  assert(clientEntities.total === 3, 'El filtro por cliente debe devolver solo sus fichas.')
+  assert(clientEntities.total === 6, 'El filtro por cliente debe devolver solo sus fichas.')
 
   const single = await request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
-    body: { identification: 'MOTO-010', categoryId: motoCategoryId, clienteId: newClient.id },
+    body: { displayName: 'MOTO-010', categoryId: motoCategoryId, clienteId: newClient.id },
   })
   assert(typeof single.shortCode === 'string' && single.clienteId === newClient.id,
     'Crear una ficha desde el panel debe vincularla al cliente elegido.')
 
   const orphan = await request('admin', 'create-entity', {
     method: 'POST', cookie: adminCookie,
-    body: { identification: 'SIN-DUENO-01', categoryId: motoCategoryId, clienteId: null },
+    body: { displayName: 'SIN-DUENO-01', categoryId: motoCategoryId, clienteId: null },
   })
   const orphanContext = await request('entity', 'context', { query: { token: orphan.shortCode } })
   assert(!orphanContext.auth.canRequestCode && !orphanContext.auth.authorized,
@@ -284,7 +290,7 @@ try {
   })).items[0].id
   await request('admin', 'update-entity', {
     method: 'PATCH', cookie: adminCookie,
-    body: { id: singleId, identification: 'MOTO-010', categoryId: motoCategoryId },
+    body: { id: singleId, displayName: 'MOTO-010', categoryId: motoCategoryId },
   })
   const afterPartial = await request('admin', 'entities', {
     cookie: adminCookie, query: { search: 'MOTO-010' },
@@ -292,8 +298,8 @@ try {
   assert(afterPartial.items[0].clienteId === newClient.id,
     'Un PATCH sin clienteId no debe desvincular la ficha de su cliente.')
 
-  const moto1 = clientEntities.items.find((item) => item.identification === 'MOTO-001')
-  const moto2 = clientEntities.items.find((item) => item.identification === 'MOTO-002')
+  const moto1 = clientEntities.items.find((item) => item.displayName === 'MOTO-001')
+  const moto2 = clientEntities.items.find((item) => item.displayName === 'MOTO-002')
 
   // --- Portal del cliente -------------------------------------------------
   await expectStatus(() => request('client', 'context'), 401,
@@ -339,7 +345,7 @@ try {
   assert(clientCookie.startsWith('gd_client_session='),
     'El portal debe emitir su propia cookie de sesión.')
   assert(portalLogin.data.cliente.email === 'finca@example.com', 'El portal debe saludar al cliente.')
-  assert(portalLogin.data.total === 4, 'El portal debe listar todas las fichas del cliente.')
+  assert(portalLogin.data.total === 7, 'El portal debe listar todas las fichas del cliente.')
 
   const noPending = await statusOf(() => request('client', 'verify-code', {
     method: 'POST', body: { email: 'finca@example.com', code: '000002' },
@@ -360,14 +366,14 @@ try {
   const portalContext = await request('client', 'context', {
     cookie: clientCookie, includeResponse: true,
   })
-  assert(portalContext.data.total === 4, 'El listado del portal debe mantenerse con la sesión.')
+  assert(portalContext.data.total === 7, 'El listado del portal debe mantenerse con la sesión.')
   assert(portalContext.response.headers.get('netlify-cdn-cache-control') === 'no-store',
     'El listado del portal nunca debe cachearse en el CDN.')
 
   const portalSearch = await request('client', 'context', {
     cookie: clientCookie, query: { search: 'MOTO-002' },
   })
-  assert(portalSearch.total === 1 && portalSearch.items[0].identificacion === 'MOTO-002',
+  assert(portalSearch.total === 1 && portalSearch.items[0].displayName === 'MOTO-002',
     'El buscador del portal debe filtrar las fichas del cliente.')
 
   // La ficha se abre desbloqueada con la sesión del portal.
@@ -407,10 +413,10 @@ try {
   // también todos sus datos y exige haber entrado por el enlace de la ficha.
   await expectStatus(() => request('entity', 'delete-entity', {
     method: 'DELETE', cookie: clientCookie,
-    body: { token: moto2.shortCode, confirmation: moto2.identification },
+    body: { token: moto2.shortCode, confirmation: moto2.displayName },
   }), 401, 'El portal no debe poder borrar la ficha entera.')
   const stillThere = await request('entity', 'context', { query: { token: moto2.shortCode } })
-  assert(stillThere.entity?.identificacion === moto2.identification,
+  assert(stillThere.entity?.displayName === moto2.displayName,
     'La ficha debe seguir existiendo tras el intento desde el portal.')
 
   // Cambiar el correo es cambiar la credencial: corta las sesiones abiertas.
