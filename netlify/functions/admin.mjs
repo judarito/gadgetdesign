@@ -458,7 +458,7 @@ async function createEntity(db, payload) {
   const displayName = requiredText(payload.displayName, DISPLAY_NAME_MAX_LENGTH, 'Nombre visible')
   const categoryId = validId(payload.categoryId, 'categoría')
   const cliente = await resolveClient(db, payload)
-    const token = await generateUniqueToken(db)
+  const token = await generateUniqueToken(db)
   const shortCode = await generateUniqueShortCode(db)
   await db.execute({
     sql: `INSERT INTO Entidades
