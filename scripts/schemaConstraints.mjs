@@ -37,15 +37,6 @@ export async function applyDataIntegrityConstraints(db) {
 async function assertNoNormalizedDuplicates(db) {
   await assertNoDuplicates(
     db,
-    `SELECT LOWER(${cleanText('Identificacion')}) AS normalized, GROUP_CONCAT(id) AS ids
-     FROM Entidades
-     GROUP BY LOWER(${cleanText('Identificacion')})
-     HAVING COUNT(*) > 1
-     LIMIT 1`,
-    'identificaciones',
-  )
-  await assertNoDuplicates(
-    db,
     `SELECT ${cleanText('token')} AS normalized, GROUP_CONCAT(id) AS ids
      FROM Entidades
      GROUP BY ${cleanText('token')}
@@ -214,9 +205,8 @@ async function assertExistingDataIsValid(db) {
 }
 
 async function createUniqueIndexes(db) {
+  await db.execute('DROP INDEX IF EXISTS idx_entidades_identification_normalized')
   await db.batch([
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_identification_normalized
-     ON Entidades (LOWER(TRIM(Identificacion)))`,
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_token ON Entidades (token)',
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_short_code
      ON Entidades (short_code) WHERE short_code IS NOT NULL`,
