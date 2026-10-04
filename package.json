@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/devLocal.mjs",
     "dev:vite": "vite",
+    "prebuild": "node scripts/writeBuildInfo.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "setup:local": "node scripts/setupLocal.mjs",
