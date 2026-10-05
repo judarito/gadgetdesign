@@ -8,9 +8,11 @@
     "dev:vite": "vite",
     "prebuild": "node scripts/writeBuildInfo.mjs",
     "build": "vite build",
+    "verify:deploy": "npm run test:functions && npm run test:deploy-smoke && npm run build",
     "preview": "vite preview",
     "setup:local": "node scripts/setupLocal.mjs",
     "test:functions": "npm run setup:local && node scripts/testFunctions.mjs",
+    "test:deploy-smoke": "node scripts/testDeploySmoke.mjs",
     "test:e2e": "playwright test",
     "setup:admin": "node scripts/setupAdmin.mjs",
     "setup:drop-legacy": "node scripts/dropLegacyOwnerColumns.mjs"
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.9",
+    "netlify-cli": "^27.10.1",
     "vite": "^8.3.1",
     "vite-plugin-vuetify": "^2.1.3"
   }

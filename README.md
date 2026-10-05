@@ -224,27 +224,23 @@ local:
 npm run test:functions
 ```
 
-### E2E contra Netlify dev
+### Validación de los despliegues
 
-Cada push a `dev` ejecuta el workflow `.github/workflows/e2e-dev.yml`. Primero
-compila y ejecuta las pruebas de Functions. Después espera a que
-`https://gadgetdesign-dev.netlify.app/build-info.json` reporte exactamente el
-mismo `GITHUB_SHA` que disparó el workflow, evitando probar por error el deploy
-anterior.
+Netlify ejecuta `npm run verify:deploy` antes de publicar cualquier cambio. El
+comando prueba las Functions contra una base local, valida la lógica del smoke
+post-deploy y compila la aplicación. Si cualquiera de esos pasos falla, Netlify
+cancela el despliegue antes de publicarlo.
 
-Los E2E usan Playwright y están bloqueados para ejecutarse únicamente contra
+Después de un deploy exitoso, `netlify/functions/deploy-smoke.mjs` comprueba el
+`build-info.json` del deploy inmutable y la Function `health`. En
+`gadgetdesign-dev` también consulta la entidad ficticia `Local001`. El resultado
+queda registrado como JSON en los logs de la Function con `type: deploy-smoke`.
+
+Los E2E completos usan Playwright y se ejecutan manualmente antes de fusionar
+`dev` en `main`. Están bloqueados para apuntar únicamente a
 `gadgetdesign-dev.netlify.app`. La prueba administrativa crea dos fichas con el
 mismo `displayName`, comprueba que reciben URLs públicas distintas, abre ambas
 fichas y elimina los datos de prueba al terminar.
-
-GitHub Actions requiere este secreto del repositorio:
-
-```txt
-DEV_ADMIN_PASSWORD
-```
-
-Debe contener solamente la contraseña administrativa del entorno de pruebas.
-Nunca uses la contraseña de producción.
 
 Para ejecutar los E2E manualmente desde una máquina de desarrollo:
 
