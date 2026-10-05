@@ -5,6 +5,29 @@ import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const url = env.LOCAL_TURSO_URL || 'file:/tmp/gadgetdesign-local.db'
+
+const host = String(url).split('//')[1]?.split('.')[0] || String(url)
+console.log(`Base de datos destino: ${host}`)
+
+// Este script BORRA todas las tablas operativas antes de sembrar los datos de
+// prueba, y ahora se ejecuta en cada build: `verify:deploy` llama a `test:functions`,
+// que empieza por `setup:local`. Si alguien copiara `LOCAL_TURSO_URL` a las
+// variables de un sitio de Netlify, cada despliegue vaciaría esa base. La
+// comprobación va antes de crear el cliente, así que en ese caso ni se conecta.
+const esDestinoDesechable = String(url).startsWith('file:')
+
+if (!esDestinoDesechable && process.env.CONFIRM_DESTRUCTIVE !== 'si') {
+  console.error('')
+  console.error(`  Esta base NO es un archivo local: ${host}`)
+  console.error('  Este comando BORRA todas las fichas, clientes y categorías antes')
+  console.error('  de sembrar los datos de prueba, y se ejecuta en cada build.')
+  console.error('  Si de verdad quieres vaciarla, repítelo así:')
+  console.error('')
+  console.error('    CONFIRM_DESTRUCTIVE=si npm run setup:local')
+  console.error('')
+  process.exit(1)
+}
+
 const db = createClient({ url })
 
 await db.batch([
