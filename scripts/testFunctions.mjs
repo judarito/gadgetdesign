@@ -6,6 +6,12 @@ import { publicEntityCacheHeaders } from '../netlify/functions/_lib/cache.mjs'
 import { clearCookie, sessionCookie } from '../netlify/functions/_lib/http.mjs'
 
 const env = loadEnv('', process.cwd(), '')
+const localTursoUrl = env.LOCAL_TURSO_URL || 'file:/tmp/gadgetdesign-local.db'
+
+// El build de Netlify expone TURSO_URL pero no lee los .env locales. Fijar esta
+// variable antes de iniciar Functions evita que la suite escriba en una base
+// remota por accidente.
+process.env.LOCAL_TURSO_URL = localTursoUrl
 
 // La caché de CDN solo se activa si hay con qué invalidarla. El servidor de
 // pruebas corre con un token ficticio para poder comprobar el camino cacheado;
@@ -110,7 +116,7 @@ try {
   const createdItem = created.entity.customData.find((item) => item.key === 'Dato secreto de prueba')
   assert(createdItem?.value === 'VALOR-SENSIBLE', 'El CRUD autorizado debe devolver el valor protegido.')
 
-  const db = createClient({ url: env.LOCAL_TURSO_URL })
+  const db = createClient({ url: localTursoUrl })
   const stored = await db.execute("SELECT custom_data FROM Entidades WHERE short_code = 'Local001'")
   assert(!String(stored.rows[0].custom_data).includes('VALOR-SENSIBLE'), 'El valor protegido no debe guardarse en texto plano.')
 
