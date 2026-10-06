@@ -3,9 +3,11 @@
 Diseño previo a la implementación. Añade un **estado** a la ficha para que el
 cliente pueda gobernar las suyas sin poder publicar por su cuenta.
 
-> **Estado:** fase 1 en curso. Hecho el esquema (columna, índice, trigger de
-> validación y migración aditiva con `activa` por defecto). Pendiente el backend y
-> las dos interfaces.
+> **Estado:** fase 1 **implementada y verificada contra la base de dev**. Esquema,
+> backend y las tres interfaces. Pendiente la fase 2 (crear y aprobar) y, de la
+> fase 1, un detalle que conviene decidir antes de publicar: el punto 8, sobre si
+> desactivar un cliente o una categoría debe ocultar también sus fichas. No se ha
+> tocado.
 
 ## 1. Qué resuelve
 
@@ -43,8 +45,8 @@ Una ficha que no está `activa` **no sirve ningún dato**, ni siquiera los
 públicos. El código corto no se regenera nunca, así que la URL es la misma. Hay
 dos maneras de contarlo:
 
-- **(a)** la ruta resuelve con un estado «no disponible», sin datos;
-- **(b)** la ruta deja de resolver y cae en «no encontrada».
+- **(a)** la ruta resuelve con un estado «no disponible», sin datos; **[implementada]**
+- (b) la ruta deja de resolver y cae en «no encontrada».
 
 **Se implementa (a)**, que es lo que se pregunta más abajo para confirmar: un QR
 va pegado a un objeto físico, y quien lo escanee merece leer que la ficha está
