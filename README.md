@@ -271,11 +271,18 @@ queda registrado como JSON en los logs de la Function con `type: deploy-smoke`.
 
 Los E2E completos usan Playwright y se ejecutan manualmente antes de fusionar
 `dev` en `main`. Están bloqueados para apuntar únicamente a
-`gadgetdesign-dev.netlify.app`. Son cuatro escenarios: el sitio expone su
+`gadgetdesign-dev.netlify.app`. Son cinco escenarios: el sitio expone su
 metadata; el panel permite dos fichas con el mismo `displayName` y ambas rutas
 públicas funcionan; el panel oculta una ficha, el público deja de verla y puede
-volver a publicarla; y el cliente la desactiva desde el portal. Todos limpian sus
-datos de prueba al terminar.
+volver a publicarla; el cliente la desactiva desde el portal; y una ficha
+`pendiente` no se publica hasta que el administrador la aprueba. Todos limpian
+sus datos de prueba al terminar.
+
+El escenario de `pendiente` la deja en ese estado por API, porque todavía no hay
+interfaz que las cree: eso llega en la fase 2. Y el del portal consume un código
+de acceso, así que si se ejecuta varias veces seguidas puede agotar el límite de
+cinco cada quince minutos del cliente de pruebas; en ese caso el escenario se
+salta, indicando el motivo, en vez de fallar.
 
 Las lecturas públicas se abren en un contexto aparte, sin las cookies de la
 sesión: en el mismo contexto el dueño ve su ficha aunque esté desactivada —que es
