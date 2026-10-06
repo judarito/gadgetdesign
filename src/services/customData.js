@@ -1,3 +1,4 @@
+import { normalizeDataType } from './dataTypes'
 import {
   assertCustomDataJsonSize,
   sanitizeCustomDataInput,
@@ -53,27 +54,30 @@ export function createCustomDataItem({ key, value, dataType, suggestionId }) {
 function normalizeItem(item, index = 0) {
   const fallbackKey = `Dato ${index + 1}`
   const isProtected = Boolean(item.protected)
-  const sanitized = sanitizeCustomDataInput({
-    key: item.key || item.label || fallbackKey,
-    value: item.value || (isProtected && item.encryptedValue ? 'protected' : ''),
-    dataType: item.dataType,
-  })
+  const encryptedValue = isProtected ? sanitizeText(item.encryptedValue) : ''
 
-  const normalized = {
+  const base = {
     id: sanitizeText(item.id || crypto.randomUUID()),
-    key: sanitized.key,
-    dataType: sanitized.dataType,
+    key: sanitizeText(item.key || item.label || fallbackKey) || fallbackKey,
+    dataType: normalizeDataType(item.dataType),
     suggestionId: normalizeSuggestionId(item.suggestionId),
     protected: isProtected,
   }
 
-  if (isProtected && item.encryptedValue) {
-    normalized.encryptedValue = sanitizeText(item.encryptedValue)
-  } else {
-    normalized.value = sanitized.value
-  }
+  // Un dato protegido ya guardado no tiene valor en claro: solo queda el texto
+  // cifrado. Antes se usaba el marcador `'protected'` como sustituto y se pasaba
+  // por la validación de tipo, que lo rechazaba en cuanto el tipo no era texto:
+  // una fecha protegida fallaba con "Selecciona una fecha válida". Cuando hay
+  // cifrado no hay valor que validar.
+  if (encryptedValue) return { ...base, encryptedValue }
 
-  return normalized
+  const sanitized = sanitizeCustomDataInput({
+    key: base.key,
+    value: item.value || '',
+    dataType: item.dataType,
+  })
+
+  return { ...base, key: sanitized.key, dataType: sanitized.dataType, value: sanitized.value }
 }
 
 function normalizeSuggestionId(value) {

@@ -122,6 +122,27 @@ try {
   const createdItem = created.entity.customData.find((item) => item.key === 'Dato secreto de prueba')
   assert(createdItem?.value === 'VALOR-SENSIBLE', 'El CRUD autorizado debe devolver el valor protegido.')
 
+  // Un dato protegido guarda solo el texto cifrado, así que al renormalizar para
+  // escribir no queda valor que validar. Antes se colaba el marcador interno
+  // 'protected' por la validación de tipo y cualquier tipo que no fuera texto lo
+  // rechazaba: una fecha protegida respondía "Selecciona una fecha válida".
+  // La cobertura solo probaba protegidos de tipo texto, por eso no se vio.
+  for (const caso of [
+    { key: 'Fecha protegida', value: '2027-03-15', dataType: 'date' },
+    { key: 'Número protegido', value: '42', dataType: 'number' },
+    { key: 'Correo protegido', value: 'alguien@example.com', dataType: 'email' },
+    { key: 'Teléfono protegido', value: '300 123 4567', dataType: 'tel' },
+    { key: 'Enlace protegido', value: 'https://example.com', dataType: 'url' },
+  ]) {
+    const guardado = await request('entity', 'create-data', {
+      method: 'POST', cookie: entityCookie,
+      body: { ...route, data: { ...caso, protected: true } },
+    })
+    const item = guardado.entity.customData.find((candidato) => candidato.key === caso.key)
+    assert(item?.value === caso.value && item?.protected === true,
+      `Un dato protegido de tipo ${caso.dataType} debe guardarse y devolverse en claro al dueño.`)
+  }
+
   const db = createClient({ url: localTursoUrl })
   const stored = await db.execute("SELECT custom_data FROM Entidades WHERE short_code = 'Local001'")
   assert(!String(stored.rows[0].custom_data).includes('VALOR-SENSIBLE'), 'El valor protegido no debe guardarse en texto plano.')
@@ -540,6 +561,7 @@ try {
   console.log('✓ OTP local y cookie HttpOnly')
   console.log('✓ Revelado autorizado')
   console.log('✓ Cifrado AES-GCM en almacenamiento')
+  console.log('✓ Un dato protegido de cualquier tipo se puede guardar')
   console.log('✓ CRUD protegido')
   console.log('✓ Restricciones de integridad aplicadas directamente en la base')
   console.log('✓ Confirmaciones y eliminación completa transaccional')
