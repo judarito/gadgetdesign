@@ -114,6 +114,28 @@ async function buildContext(db, cliente, params) {
   }
 }
 
+/**
+ * Respuesta de `request-code`, siempre con la misma forma para no revelar qué
+ * correos están registrados.
+ *
+ * En el entorno de pruebas el código se entrega por consola y la canalización de
+ * logs de Netlify pierde líneas: se ha observado un código generado en la base
+ * cuyo aviso nunca apareció, con tres vecinos sí publicados. Con
+ * `OTP_DEV_HINT=true` se devuelve también en la respuesta para que el portal lo
+ * muestre. Lleva doble candado: además hace falta que el modo de entrega sea
+ * `console`, que es justo lo que producción no usa, así que producción no puede
+ * cumplir las dos condiciones ni por descuido.
+ *
+ * Un correo sin cliente recibe un código inventado: si el campo solo lo llevaran
+ * los correos registrados, la respuesta volvería a distinguirlos.
+ */
+function accessCodeResponse(code = null) {
+  const muestraElCodigo = process.env.OTP_DEV_HINT === 'true'
+    && (process.env.OTP_DELIVERY_MODE || 'resend') === 'console'
+
+  return muestraElCodigo ? { ok: true, devCode: code || generateOtp() } : { ok: true }
+}
+
 async function requestCode(request, payload) {
   const db = getDb()
   const email = normalizeEmail(payload.email)
@@ -148,13 +170,13 @@ async function requestCode(request, payload) {
   // A partir de aquí la respuesta es siempre {ok:true}, exista o no el correo y
   // haya agotado o no su límite por cliente. Ese límite solo decide si se envía
   // el correo: un 429 aquí volvería a distinguir los correos registrados.
-  if (!cliente || !cliente.active) return json({ ok: true })
+  if (!cliente || !cliente.active) return json(accessCodeResponse())
 
   const perClient = await db.execute({
     sql: 'SELECT COUNT(*) AS total FROM ClientAccessCodes WHERE cliente_id = ? AND created_at >= ?',
     args: [cliente.id, now - OTP_WINDOW_SECONDS],
   })
-  if (Number(perClient.rows[0]?.total || 0) >= OTP_LIMIT_PER_CLIENT) return json({ ok: true })
+  if (Number(perClient.rows[0]?.total || 0) >= OTP_LIMIT_PER_CLIENT) return json(accessCodeResponse())
 
   const code = generateOtp()
   const inserted = await db.execute({
@@ -176,7 +198,7 @@ async function requestCode(request, payload) {
     throw error
   }
 
-  return json({ ok: true })
+  return json(accessCodeResponse(code))
 }
 
 async function verifyCode(request, payload) {

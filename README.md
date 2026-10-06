@@ -171,6 +171,14 @@ El sitio de pruebas es público y no tiene protección por contraseña, por eso
 trabaja contra su propia base de datos. El OTP se imprime en los logs de las
 Functions (`OTP_DELIVERY_MODE=console`) en lugar de enviarse por correo.
 
+Ese camino no es fiable —la canalización de logs pierde líneas—, así que el sitio
+de pruebas define además `OTP_DEV_HINT=true`: con eso el portal recibe el código
+en la respuesta de `request-code` y lo muestra en pantalla, dentro de un aviso de
+«Modo de pruebas». Lleva dos condiciones a propósito, `OTP_DEV_HINT=true` **y**
+`OTP_DELIVERY_MODE=console`, que es justo lo que producción no usa. Ponlo solo en
+el sitio de pruebas: en producción convertiría el portal en un acceso libre a
+cualquier cliente con solo saber su correo.
+
 Para leerlo sin abrir el panel de Netlify, la CLI sirve, pero hay que apuntarla al
 sitio de pruebas: el repositorio está vinculado al de producción
 (`.netlify/state.json`), así que **cualquier comando de Netlify lanzado desde la

@@ -320,11 +320,17 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 300))
   assert(!logs.slice(unknownMark).includes('Código local para'),
     'Un correo desconocido no debe generar ningún envío.')
+  // El código en la respuesta es una ayuda del entorno de pruebas y necesita
+  // `OTP_DEV_HINT` además del modo `console`: sin la variable no debe aparecer.
+  assert(unknown.devCode === undefined,
+    'Sin OTP_DEV_HINT, request-code no debe devolver el código en la respuesta.')
 
   const portalMark = logs.length
-  await request('client', 'request-code', {
+  const hinted = await request('client', 'request-code', {
     method: 'POST', body: { email: 'finca@example.com' },
   })
+  assert(hinted.devCode === undefined,
+    'Sin OTP_DEV_HINT, ni siquiera un correo registrado debe recibir el código en la respuesta.')
   const portalCode = await waitForOtp(portalMark)
 
   await expectStatus(() => request('client', 'verify-code', {
@@ -539,6 +545,7 @@ try {
   console.log('✓ Revocación al cambiar el correo y solo lectura al desactivar')
   console.log('✓ Portal del cliente: OTP propio y listado de sus fichas')
   console.log('✓ Anti-enumeración en el portal (correo desconocido = misma respuesta)')
+  console.log('✓ El código solo viaja en la respuesta con OTP_DEV_HINT')
   console.log('✓ La ficha se abre desbloqueada con la sesión del portal')
   console.log('✓ La lectura con sesión de portal nunca se sirve desde la caché pública')
   console.log('✓ El portal pagina cuando el cliente tiene más de 50 fichas')
