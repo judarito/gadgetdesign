@@ -73,6 +73,9 @@ export default async function handler(request) {
     if (request.method === 'POST' && action === 'bulk-create-entities') return await bulkCreateEntities(db, body)
     if (request.method === 'PATCH' && action === 'update-entity') return await updateEntity(db, body)
     if (request.method === 'POST' && action === 'regenerate-entity') return await regenerateEntity(db, body)
+    if (request.method === 'POST' && action === 'set-entity-status') {
+      return await setEntityStatus(db, body)
+    }
     if (request.method === 'DELETE' && action === 'delete-entity') return await deleteEntity(db, body)
 
     throw new HttpError(404, 'Operación administrativa no encontrada.')
@@ -414,6 +417,9 @@ function mapClient(row) {
   }
 }
 
+/** Los estados que admite una ficha. Ver docs/fichas-cliente.md. */
+const ENTITY_STATUSES = ['pendiente', 'activa', 'inactiva']
+
 async function listEntities(db, params) {
   const clauses = []
   const args = []
@@ -424,6 +430,12 @@ async function listEntities(db, params) {
   if (params.get('clienteId')) {
     clauses.push('e.clienteID = ?')
     args.push(validId(params.get('clienteId'), 'cliente'))
+  }
+  const status = sanitizeText(params.get('status'))
+  if (status) {
+    if (!ENTITY_STATUSES.includes(status)) throw new HttpError(400, 'Estado no válido.')
+    clauses.push('e.status = ?')
+    args.push(status)
   }
   const search = sanitizeText(params.get('search'))
   if (search) {
@@ -442,7 +454,7 @@ async function listEntities(db, params) {
   )
   const result = await db.execute({
     sql: `SELECT e.id, e.Identificacion AS display_name, e.token, e.short_code,
-                 e.categoriaID, e.clienteID,
+                 e.categoriaID, e.clienteID, e.status,
                  cl.name AS client_name, cl.email AS client_email, cl.phone AS client_phone,
                  c.name AS category_name, c.code AS category_code
           FROM Entidades e
@@ -576,6 +588,29 @@ async function regenerateEntity(db, payload) {
   return json({ token, shortCode })
 }
 
+/**
+ * Activa o desactiva una ficha desde el panel. El administrador es el único que
+ * puede publicar: devolver a `activa` lo que el cliente desactivó, o aprobar más
+ * adelante lo que cree el cliente, pasa siempre por aquí.
+ */
+async function setEntityStatus(db, payload) {
+  const id = validId(payload.id, 'entidad')
+  const status = sanitizeText(payload.status)
+  if (!ENTITY_STATUSES.includes(status)) throw new HttpError(400, 'Estado no válido.')
+
+  const result = await db.execute({
+    sql: 'UPDATE Entidades SET status = ? WHERE id = ?',
+    args: [status, id],
+  })
+  if (!result.rowsAffected) throw new HttpError(404, 'No se encontró la entidad.')
+
+  // El estado decide si se ve en público, así que la caché de esa ficha deja de
+  // valer en el acto.
+  await purgeEntityCache(id)
+
+  return json({ ok: true, status })
+}
+
 async function deleteEntity(db, payload) {
   const id = validId(payload.id, 'entidad')
   await db.batch([
@@ -596,6 +631,7 @@ function mapEntity(row) {
     clientName: String(row.client_name || ''),
     clientEmail: String(row.client_email || ''),
     clientPhone: String(row.client_phone || ''),
+    status: String(row.status || 'activa'),
   }
 }
 
