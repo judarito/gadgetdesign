@@ -324,10 +324,7 @@ function showToast(message, color = 'success') {
         <div class="section-toolbar">
           <div>
             <h2>Fichas a tu nombre</h2>
-            <p>
-              {{ total }} {{ total === 1 ? 'ficha registrada' : 'fichas registradas' }}.
-              Al abrir una la verás desbloqueada.
-            </p>
+            <p>{{ total }} {{ total === 1 ? 'ficha registrada' : 'fichas registradas' }}.</p>
           </div>
 
           <form class="portal-search" @submit.prevent="applySearch">
@@ -341,7 +338,7 @@ function showToast(message, color = 'success') {
                 </button>
               </div>
             </label>
-            <v-btn class="filter-button" color="primary" type="submit" variant="flat">Buscar</v-btn>
+            <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Buscar</v-btn>
           </form>
         </div>
 
@@ -526,11 +523,14 @@ button { letter-spacing: 0; }
 .section-toolbar h2 { margin: 0; font-size: 1.25rem; }
 .section-toolbar p { margin: 5px 0 0; color: #69788e; }
 .section-toolbar :deep(.v-btn) { text-transform: none; font-weight: 700; letter-spacing: 0; }
-.portal-search { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+/* Rejilla con columnas definidas, como los filtros del panel: con flex, el
+   `width: 100%` de la caja se resolvía contra un ancho indefinido y el botón
+   acababa partido en una segunda línea, abajo a la izquierda. */
+.portal-search { display: grid; grid-template-columns: minmax(220px, 320px) auto; gap: 10px; align-items: end; }
 /* La clase va en el propio `label`, como en el panel, para que `> div` alcance
    la caja: con la clase en el `form` la caja quedaba a dos niveles y se pintaba
    sin borde, con el icono descolgado encima del texto. */
-.search-field { display: grid; gap: 7px; width: min(100%, 320px); color: #34445e; font-size: .88rem; font-weight: 700; }
+.search-field { display: grid; gap: 7px; width: 100%; color: #34445e; font-size: .88rem; font-weight: 700; }
 .search-field > div { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 11px; background: #fff; border: 1px solid #cdd9e7; border-radius: 6px; }
 .search-field > div:focus-within { border-color: #0873ff; box-shadow: 0 0 0 3px rgba(8, 115, 255, .12); }
 .search-field input { width: 100%; min-width: 0; border: 0; outline: 0; }
@@ -587,7 +587,7 @@ button { letter-spacing: 0; }
   .session-badge { margin-left: 0; }
   .portal-content { padding: 22px 18px 50px; }
   .section-toolbar { align-items: stretch; }
-  .search-field { flex-direction: column; align-items: stretch; }
+  .portal-search { grid-template-columns: 1fr; }
   .entity-row { grid-template-columns: 1fr; gap: 12px; padding: 14px 18px; }
   .action-cell { justify-content: space-between; }
 }
