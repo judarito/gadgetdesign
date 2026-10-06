@@ -538,7 +538,11 @@ button { letter-spacing: 0; }
 .filter-button { min-height: 44px; }
 
 .portal-group { margin-bottom: 26px; }
-.group-title { margin: 0 0 10px; color: #6c7a90; font-size: .76rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+/* El encabezado es el nombre que escribió el administrador, así que se respeta
+   su capitalización. Las mayúsculas del panel son para rótulos de columna
+   ("CATEGORÍA"), no para datos escritos por una persona: "Vacas lecheras" se leía
+   "VACAS LECHERAS". */
+.group-title { margin: 0 0 10px; color: #3d5678; font-size: .92rem; font-weight: 800; letter-spacing: .01em; }
 .data-table { overflow: hidden; background: #fff; border: 1px solid #dce5ef; border-radius: 7px; }
 .table-row { display: grid; align-items: center; gap: 18px; padding: 0 18px; color: #4e5d73; border-bottom: 1px solid #e5ebf2; }
 .table-row:last-child { border-bottom: 0; }
