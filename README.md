@@ -179,6 +179,15 @@ en la respuesta de `request-code` y lo muestra en pantalla, dentro de un aviso d
 el sitio de pruebas: en producción convertiría el portal en un acceso libre a
 cualquier cliente con solo saber su correo.
 
+Dos avisos al probar con esa ayuda:
+
+- **Los límites siguen contando.** Son 5 códigos por cliente y 15 minutos, y 10
+  por IP. Al agotarlos el servidor responde igual pero no genera código, y como la
+  respuesta tiene que ser idéntica para no delatar correos registrados, **el código
+  que verás será de relleno y no entrará**. Si eso pasa, espera o usa otro cliente.
+- El código de relleno también aparece cuando el correo no existe, que es
+  justamente lo que mantiene la respuesta indistinguible.
+
 Para leerlo sin abrir el panel de Netlify, la CLI sirve, pero hay que apuntarla al
 sitio de pruebas: el repositorio está vinculado al de producción
 (`.netlify/state.json`), así que **cualquier comando de Netlify lanzado desde la
