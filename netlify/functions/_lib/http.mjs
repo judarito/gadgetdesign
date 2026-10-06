@@ -6,14 +6,22 @@ export class HttpError extends Error {
 }
 
 export function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      ...headers,
-    },
+  const merged = new Headers({
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
   })
+
+  for (const [key, value] of Object.entries(headers)) {
+    // Un array permite emitir varias cabeceras con el mismo nombre, que es lo
+    // que hace falta para borrar las dos cookies a la vez.
+    if (Array.isArray(value)) {
+      for (const item of value) merged.append(key, item)
+    } else if (value !== undefined && value !== null) {
+      merged.set(key, value)
+    }
+  }
+
+  return new Response(JSON.stringify(data), { status, headers: merged })
 }
 
 export function handleError(error) {
@@ -43,18 +51,34 @@ export function getCookie(request, name) {
   return null
 }
 
-export function sessionCookie(name, value, maxAge) {
-  const secure = secureCookieSuffix()
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`
+/** IP del cliente, para los límites de uso. */
+export function getClientIp(request) {
+  return String(
+    request.headers.get('x-nf-client-connection-ip') ||
+    request.headers.get('x-forwarded-for') ||
+    'local',
+  ).split(',')[0].trim().slice(0, 64)
 }
 
-export function clearCookie(name) {
-  const secure = secureCookieSuffix()
-  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`
+export function sessionCookie(name, value, maxAge, request) {
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secureCookieSuffix(request)}`
 }
 
-function secureCookieSuffix() {
-  return ['production', 'deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT)
-    ? '; Secure'
-    : ''
+export function clearCookie(name, request) {
+  return `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookieSuffix(request)}`
+}
+
+/**
+ * `Secure` se decide por el protocolo real de la petición.
+ *
+ * Antes se miraba `process.env.CONTEXT`, que en este runtime de Functions no
+ * existe: la comprobación era siempre falsa y las cookies de producción nunca
+ * llevaban `Secure`. El protocolo de la petición, en cambio, siempre está.
+ */
+function secureCookieSuffix(request) {
+  try {
+    return new URL(request.url).protocol === 'https:' ? '; Secure' : ''
+  } catch {
+    return ''
+  }
 }

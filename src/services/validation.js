@@ -2,7 +2,8 @@ import { normalizeDataType } from './dataTypes'
 
 export const CATEGORY_CODE_MAX_LENGTH = 20
 export const ENTITY_TOKEN_MAX_LENGTH = 40
-export const IDENTIFICATION_MAX_LENGTH = 200
+export const DISPLAY_NAME_MAX_LENGTH = 200
+export const CUSTOM_DATA_VALUE_MAX_LENGTH = 200
 export const CUSTOM_DATA_KEY_MAX_LENGTH = 50
 export const CUSTOM_DATA_JSON_MAX_LENGTH = 5000
 
@@ -27,7 +28,7 @@ export function sanitizeCustomDataInput(payload) {
   }
 
   assertMaxLength(key, CUSTOM_DATA_KEY_MAX_LENGTH, 'Dato')
-  assertMaxLength(value, IDENTIFICATION_MAX_LENGTH, 'Valor')
+  assertMaxLength(value, CUSTOM_DATA_VALUE_MAX_LENGTH, 'Valor')
   validateCustomDataValue(value, dataType)
 
   return { key, value, dataType }

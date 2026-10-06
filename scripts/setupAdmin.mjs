@@ -1,7 +1,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
-import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
+import { applyDataIntegrityConstraints, cleanText } from './schemaConstraints.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const url = env.TURSO_URL || env.VITE_TURSO_URL
@@ -10,6 +10,12 @@ const authToken = env.TURSO_TOKEN || env.VITE_TURSO_TOKEN
 if (!url || !authToken) {
   throw new Error('Faltan TURSO_URL o TURSO_TOKEN en .env.')
 }
+
+// Este script es aditivo e idempotente, así que no hace falta confirmar nada,
+// pero saber contra qué base va evita sustos: es la única forma de distinguir de
+// un vistazo si estás apuntando a pruebas o a producción.
+const host = String(url).split('//')[1]?.split('.')[0] || String(url)
+console.log(`Base de datos destino: ${host}`)
 
 const db = createClient({ url, authToken })
 
@@ -75,17 +81,15 @@ if (!hasShortCode) {
   await db.execute('ALTER TABLE Entidades ADD COLUMN short_code TEXT')
 }
 
-const entitySecurityColumns = [
-  ['owner_name', 'TEXT'],
-  ['owner_email', 'TEXT'],
-  ['owner_phone', 'TEXT'],
-  ['auth_version', 'INTEGER NOT NULL DEFAULT 1'],
-]
+// owner_name/owner_email/owner_phone ya no se crean: el dueño vive en Clientes.
+// Las bases que vienen de antes conservan esas columnas hasta que se ejecute
+// `npm run setup:drop-legacy`.
+const hasLegacyOwnerColumns = entityColumns.rows.some((column) => column.name === 'owner_email')
 
-for (const [name, definition] of entitySecurityColumns) {
-  if (!entityColumns.rows.some((column) => column.name === name)) {
-    await db.execute(`ALTER TABLE Entidades ADD COLUMN ${name} ${definition}`)
-  }
+// auth_version sigue existiendo como columna histórica: la sesión ya no se
+// revoca por ficha, pero la columna es NOT NULL y los triggers la validan.
+if (!entityColumns.rows.some((column) => column.name === 'auth_version')) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1')
 }
 
 await db.execute(`CREATE TABLE IF NOT EXISTS EntityAccessCodes (
@@ -117,6 +121,114 @@ await db.execute(`CREATE TABLE IF NOT EXISTS EntityAliases (
 await db.execute(
   'CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity ON EntityAliases (entity_id)',
 )
+
+await db.execute(`CREATE TABLE IF NOT EXISTS Clientes (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  active NUMERIC NOT NULL DEFAULT 1,
+  auth_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`)
+
+await db.execute(`CREATE TABLE IF NOT EXISTS ClientAccessCodes (
+  id INTEGER PRIMARY KEY,
+  cliente_id INTEGER NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  consumed NUMERIC NOT NULL DEFAULT 0,
+  request_ip TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  CONSTRAINT constraint_ClientAccessCodes_Cliente
+    FOREIGN KEY (cliente_id) REFERENCES Clientes (id) ON DELETE CASCADE
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_lookup ON ClientAccessCodes (cliente_id, created_at)',
+)
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
+)
+
+await db.execute(`CREATE TABLE IF NOT EXISTS ClientOtpRequests (
+  id INTEGER PRIMARY KEY,
+  request_ip TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)`)
+
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
+)
+
+
+// La limpieza por antigüedad no puede usar los índices que empiezan por id.
+await db.execute(
+  'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
+)
+
+if (!entityColumns.rows.some((column) => column.name === 'clienteID')) {
+  await db.execute('ALTER TABLE Entidades ADD COLUMN clienteID INTEGER REFERENCES Clientes (id)')
+}
+
+await db.execute('CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)')
+
+// Alta de clientes a partir de los dueños ya existentes. Solo aplica a bases
+// que todavía tienen las columnas heredadas; en una base nueva no hay nada que
+// migrar y esas columnas ya no se crean.
+if (hasLegacyOwnerColumns) {
+  // Agrupa por correo normalizado y, para cada campo, toma el valor NO VACÍO
+  // más reciente de cualquier ficha del grupo: la última ficha creada puede
+  // tener el nombre vacío y no debe pisar el que ya había.
+  await db.execute(`INSERT INTO Clientes (name, email, phone)
+SELECT
+  substr(COALESCE(
+    (SELECT NULLIF(TRIM(e2.owner_name), '')
+       FROM Entidades e2
+      WHERE LOWER(${cleanText('e2.owner_email')}) = LOWER(${cleanText('e.owner_email')})
+        AND NULLIF(TRIM(e2.owner_name), '') IS NOT NULL
+      ORDER BY e2.id DESC LIMIT 1),
+    CASE WHEN instr(LOWER(${cleanText('e.owner_email')}), '@') > 1
+         THEN substr(LOWER(${cleanText('e.owner_email')}), 1,
+                     instr(LOWER(${cleanText('e.owner_email')}), '@') - 1)
+         ELSE LOWER(${cleanText('e.owner_email')}) END
+  ), 1, 100),
+  LOWER(${cleanText('e.owner_email')}),
+  (SELECT NULLIF(TRIM(e3.owner_phone), '')
+     FROM Entidades e3
+    WHERE LOWER(${cleanText('e3.owner_email')}) = LOWER(${cleanText('e.owner_email')})
+      AND NULLIF(TRIM(e3.owner_phone), '') IS NOT NULL
+    ORDER BY e3.id DESC LIMIT 1)
+FROM Entidades e
+WHERE e.owner_email IS NOT NULL
+  AND TRIM(e.owner_email) <> ''
+  -- Un correo que tras normalizar lleva un espacio dentro no es un correo
+  -- valido: la app lo rechazaria siempre y ese cliente no podria entrar nunca.
+  -- Se deja sin cliente para que el guardia de setup:drop-legacy lo reporte.
+  AND INSTR(${cleanText('e.owner_email')}, ' ') = 0
+  AND e.id = (
+    SELECT MIN(e4.id) FROM Entidades e4
+    WHERE LOWER(${cleanText('e4.owner_email')}) = LOWER(${cleanText('e.owner_email')})
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM Clientes c
+    WHERE LOWER(${cleanText('c.email')}) = LOWER(${cleanText('e.owner_email')})
+  )`)
+
+  // Vincula cada ficha con su cliente. Las fichas sin correo quedan en NULL y
+  // siguen en modo solo lectura.
+  await db.execute(`UPDATE Entidades
+SET clienteID = (
+  SELECT c.id FROM Clientes c
+  WHERE LOWER(${cleanText('c.email')}) = LOWER(${cleanText('Entidades.owner_email')})
+)
+WHERE clienteID IS NULL
+  AND owner_email IS NOT NULL
+  AND TRIM(owner_email) <> ''
+  AND INSTR(${cleanText('Entidades.owner_email')}, ' ') = 0`)
+}
 
 async function generateUniqueShortCode() {
   let shortCode

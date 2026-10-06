@@ -1,4 +1,4 @@
-const cleanText = (column) => `TRIM(
+export const cleanText = (column) => `TRIM(
   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
     ${column},
     CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), CHAR(160), ' '),
@@ -18,6 +18,8 @@ const managedTriggerNames = [
   'validate_entities_update',
   'validate_aliases_insert',
   'validate_aliases_update',
+  'validate_clientes_insert',
+  'validate_clientes_update',
   'validate_entity_route_insert',
   'validate_entity_route_update',
   'validate_alias_route_insert',
@@ -33,15 +35,6 @@ export async function applyDataIntegrityConstraints(db) {
 }
 
 async function assertNoNormalizedDuplicates(db) {
-  await assertNoDuplicates(
-    db,
-    `SELECT LOWER(${cleanText('Identificacion')}) AS normalized, GROUP_CONCAT(id) AS ids
-     FROM Entidades
-     GROUP BY LOWER(${cleanText('Identificacion')})
-     HAVING COUNT(*) > 1
-     LIMIT 1`,
-    'identificaciones',
-  )
   await assertNoDuplicates(
     db,
     `SELECT ${cleanText('token')} AS normalized, GROUP_CONCAT(id) AS ids
@@ -88,6 +81,15 @@ async function assertNoNormalizedDuplicates(db) {
      HAVING COUNT(*) > 1
      LIMIT 1`,
     'sugerencias de una misma categoría',
+  )
+  await assertNoDuplicates(
+    db,
+    `SELECT LOWER(${cleanText('email')}) AS normalized, GROUP_CONCAT(id) AS ids
+     FROM Clientes
+     GROUP BY LOWER(${cleanText('email')})
+     HAVING COUNT(*) > 1
+     LIMIT 1`,
+    'correos de clientes',
   )
 
   const routeCollision = await db.execute(`
@@ -140,11 +142,12 @@ async function normalizeExistingData(db) {
     `UPDATE Entidades
      SET Identificacion = ${cleanText('Identificacion')},
          token = ${cleanText('token')},
-         short_code = CASE WHEN short_code IS NULL THEN NULL ELSE ${cleanText('short_code')} END,
-         owner_name = CASE WHEN owner_name IS NULL THEN NULL ELSE ${cleanText('owner_name')} END,
-         owner_email = CASE WHEN owner_email IS NULL THEN NULL ELSE LOWER(${cleanText('owner_email')}) END,
-         owner_phone = CASE WHEN owner_phone IS NULL THEN NULL ELSE ${cleanText('owner_phone')} END`,
+         short_code = CASE WHEN short_code IS NULL THEN NULL ELSE ${cleanText('short_code')} END`,
     `UPDATE EntityAliases SET code = ${cleanText('code')}`,
+    `UPDATE Clientes
+     SET name = ${cleanText('name')},
+         email = LOWER(${cleanText('email')}),
+         phone = CASE WHEN phone IS NULL THEN NULL ELSE ${cleanText('phone')} END`,
   ], 'write')
 }
 
@@ -167,9 +170,6 @@ async function assertExistingDataIsValid(db) {
             WHERE Identificacion = '' OR LENGTH(Identificacion) > 200
                OR token = '' OR LENGTH(token) > 40 OR token GLOB '*[^A-Za-z0-9_-]*'
                OR (short_code IS NOT NULL AND (short_code = '' OR LENGTH(short_code) > 8 OR short_code GLOB '*[^A-Za-z0-9_-]*'))
-               OR LENGTH(COALESCE(owner_name, '')) > 100
-               OR LENGTH(COALESCE(owner_email, '')) > 254
-               OR LENGTH(COALESCE(owner_phone, '')) > 30
                OR LENGTH(COALESCE(custom_data, '')) > 5000
                OR auth_version < 1 LIMIT 1`,
       message: 'Hay una entidad con campos vacíos, demasiado largos o inválidos.',
@@ -178,6 +178,23 @@ async function assertExistingDataIsValid(db) {
       sql: `SELECT id FROM EntityAliases
             WHERE code = '' OR LENGTH(code) > 40 OR code GLOB '*[^A-Za-z0-9_-]*' LIMIT 1`,
       message: 'Hay un alias vacío, demasiado largo o inválido.',
+    },
+    {
+      sql: `SELECT id FROM Clientes
+            WHERE name = '' OR LENGTH(name) > 100
+               OR email = '' OR LENGTH(email) > 254 OR INSTR(email, ' ') > 0
+               OR LENGTH(COALESCE(phone, '')) > 30
+               OR auth_version < 1 LIMIT 1`,
+      message: 'Hay un cliente con nombre, correo o celular inválido.',
+    },
+    {
+      // Las foreign keys de SQLite vienen desactivadas, así que la integridad
+      // de clienteID se comprueba aquí y con los triggers.
+      sql: `SELECT e.id FROM Entidades e
+            WHERE e.clienteID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM Clientes c WHERE c.id = e.clienteID)
+            LIMIT 1`,
+      message: 'Hay una entidad apuntando a un cliente que no existe.',
     },
   ]
 
@@ -188,14 +205,15 @@ async function assertExistingDataIsValid(db) {
 }
 
 async function createUniqueIndexes(db) {
+  await db.execute('DROP INDEX IF EXISTS idx_entidades_identification_normalized')
   await db.batch([
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_identification_normalized
-     ON Entidades (LOWER(TRIM(Identificacion)))`,
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_token ON Entidades (token)',
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_short_code
      ON Entidades (short_code) WHERE short_code IS NOT NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_name_normalized
      ON CategoriaSugerencias (categoriaID, LOWER(TRIM(name)))`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_normalized
+     ON Clientes (LOWER(TRIM(email)))`,
   ], 'write')
 }
 
@@ -221,17 +239,19 @@ async function createValidationTriggers(db) {
       NEW.short_code = '' OR NEW.short_code <> TRIM(NEW.short_code)
       OR LENGTH(NEW.short_code) > 8 OR NEW.short_code GLOB '*[^A-Za-z0-9_-]*'
     ))
-    OR LENGTH(COALESCE(NEW.owner_name, '')) > 100
-    OR (NEW.owner_name IS NOT NULL AND NEW.owner_name <> TRIM(NEW.owner_name))
-    OR LENGTH(COALESCE(NEW.owner_email, '')) > 254
-    OR (NEW.owner_email IS NOT NULL AND NEW.owner_email <> LOWER(TRIM(NEW.owner_email)))
-    OR LENGTH(COALESCE(NEW.owner_phone, '')) > 30
-    OR (NEW.owner_phone IS NOT NULL AND NEW.owner_phone <> TRIM(NEW.owner_phone))
     OR LENGTH(COALESCE(NEW.custom_data, '')) > 5000
     OR NEW.auth_version < 1`
   const aliasValidation = `
     NEW.code IS NULL OR NEW.code = '' OR NEW.code <> TRIM(NEW.code)
     OR LENGTH(NEW.code) > 40 OR NEW.code GLOB '*[^A-Za-z0-9_-]*'`
+  const clientValidation = `
+    NEW.name IS NULL OR NEW.name = '' OR NEW.name <> TRIM(NEW.name) OR LENGTH(NEW.name) > 100
+    OR ${invisibleCheck('NEW.name')}
+    OR NEW.email IS NULL OR NEW.email = '' OR NEW.email <> LOWER(TRIM(NEW.email))
+    OR LENGTH(NEW.email) > 254 OR INSTR(NEW.email, ' ') > 0
+    OR LENGTH(COALESCE(NEW.phone, '')) > 30
+    OR (NEW.phone IS NOT NULL AND NEW.phone <> TRIM(NEW.phone))
+    OR NEW.auth_version < 1`
 
   await db.batch([
     ...managedTriggerNames.map((name) => `DROP TRIGGER IF EXISTS ${name}`),
@@ -243,6 +263,8 @@ async function createValidationTriggers(db) {
     validationTrigger('validate_entities_update', 'Entidades', 'UPDATE', entityValidation, 'Entidad inválida o sin normalizar.'),
     validationTrigger('validate_aliases_insert', 'EntityAliases', 'INSERT', aliasValidation, 'Alias inválido o sin normalizar.'),
     validationTrigger('validate_aliases_update', 'EntityAliases', 'UPDATE', aliasValidation, 'Alias inválido o sin normalizar.'),
+    validationTrigger('validate_clientes_insert', 'Clientes', 'INSERT', clientValidation, 'Cliente inválido o sin normalizar.'),
+    validationTrigger('validate_clientes_update', 'Clientes', 'UPDATE', clientValidation, 'Cliente inválido o sin normalizar.'),
     collisionTrigger('validate_entity_route_insert', 'INSERT'),
     collisionTrigger('validate_entity_route_update', 'UPDATE'),
     aliasCollisionTrigger('validate_alias_route_insert', 'INSERT'),

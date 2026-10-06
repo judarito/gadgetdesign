@@ -26,7 +26,7 @@ import {
 } from './services/entityApi'
 import {
   CUSTOM_DATA_KEY_MAX_LENGTH,
-  IDENTIFICATION_MAX_LENGTH,
+  CUSTOM_DATA_VALUE_MAX_LENGTH,
 } from './services/validation'
 import { CUSTOM_DATA_TYPES, formatCustomDataValue, getDataType } from './services/dataTypes'
 
@@ -61,7 +61,7 @@ const canUseCrud = computed(() =>
   routeContext.isValid && auth.value.authorized && !isLoading.value && !isSaving.value,
 )
 const isAtCustomDataLimit = computed(() => customData.value.length >= CUSTOM_DATA_LIMIT)
-const identifierText = computed(() => entity.value?.identificacion || 'Sin datos')
+const identifierText = computed(() => entity.value?.displayName || 'Sin datos')
 const categoryCopy = computed(() => getCategoryCopy(category.value))
 const helperText = computed(() => {
   if (isAtCustomDataLimit.value) return `Límite alcanzado: ${CUSTOM_DATA_LIMIT} datos personalizados.`
@@ -521,8 +521,8 @@ function getCategoryCopy(currentCategory) {
   }
 
   return {
-    title: 'Datos de tu identificación',
-    newData: 'Puedes agregar un nuevo dato a esta identificación.',
+    title: 'Datos de esta ficha',
+    newData: 'Puedes agregar un nuevo dato a esta ficha.',
   }
 }
 </script>
@@ -560,7 +560,7 @@ function getCategoryCopy(currentCategory) {
           </div>
 
           <v-sheet class="id-card" rounded="xl" border :aria-busy="isLoading">
-            <h2>Identificador</h2>
+            <h2>Nombre visible</h2>
             <div v-if="isLoading" class="identifier-pill identifier-pill--skeleton" aria-hidden="true">
               <span class="skeleton skeleton-tag" />
               <span class="skeleton skeleton-identifier" />
@@ -716,7 +716,7 @@ function getCategoryCopy(currentCategory) {
                       v-model="selectedSuggestion.value"
                       :type="getDataType(selectedSuggestion.dataType).inputType"
                       :disabled="!canUseCrud"
-                      :maxlength="IDENTIFICATION_MAX_LENGTH"
+                      :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                       :placeholder="getDataType(selectedSuggestion.dataType).placeholder"
                       aria-label="Valor del dato sugerido"
                       @pointerdown.capture="openDatePicker($event, selectedSuggestion.dataType)"
@@ -798,7 +798,7 @@ function getCategoryCopy(currentCategory) {
                         v-model="draft.value"
                         :type="getDataType(draft.dataType).inputType"
                         :disabled="!canUseCrud"
-                        :maxlength="IDENTIFICATION_MAX_LENGTH"
+                        :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                         :placeholder="getDataType(draft.dataType).placeholder"
                         aria-label="Valor personalizado"
                         @pointerdown.capture="openDatePicker($event, draft.dataType)"
@@ -979,7 +979,7 @@ function getCategoryCopy(currentCategory) {
                 v-model="newDraft.value"
                 :type="getDataType(newDraft.dataType).inputType"
                 :disabled="!canUseCrud"
-                :maxlength="IDENTIFICATION_MAX_LENGTH"
+                :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
                 :placeholder="getDataType(newDraft.dataType).placeholder"
                 @pointerdown.capture="openDatePicker($event, newDraft.dataType)"
               />
@@ -1058,7 +1058,7 @@ function getCategoryCopy(currentCategory) {
         <div class="privacy-list">
           <div>
             <strong>Qué se guarda</strong>
-            <span>El identificador, los datos de contacto del responsable y los datos personalizados de la ficha.</span>
+            <span>El nombre visible, los datos de contacto del responsable y los datos personalizados de la ficha.</span>
           </div>
           <div>
             <strong>Datos protegidos</strong>
@@ -1073,7 +1073,7 @@ function getCategoryCopy(currentCategory) {
         <div class="privacy-dialog__footer">
           <v-btn variant="text" @click="privacyDialog = false">Cerrar</v-btn>
           <v-btn
-            v-if="auth.authorized"
+            v-if="auth.scope === 'entity'"
             color="error"
             variant="tonal"
             @click="openEntityDeletion"
@@ -1081,7 +1081,7 @@ function getCategoryCopy(currentCategory) {
             <Trash2 :size="17" /> Eliminar toda la ficha
           </v-btn>
           <v-btn
-            v-else-if="auth.canRequestCode"
+            v-else-if="auth.canRequestCode && !auth.authorized"
             color="primary"
             variant="flat"
             @click="openEntityDeletion"
@@ -1089,7 +1089,11 @@ function getCategoryCopy(currentCategory) {
             <LockKeyhole :size="17" /> Verificar para administrar
           </v-btn>
         </div>
-        <p v-if="!auth.authorized && !auth.canRequestCode" class="privacy-readonly-note">
+        <p v-if="auth.authorized && auth.scope !== 'entity'" class="privacy-readonly-note">
+          Estás dentro desde el portal del cliente. Para eliminar la ficha tienes que abrirla
+          con su enlace e introducir el código que llega al correo.
+        </p>
+        <p v-else-if="!auth.authorized && !auth.canRequestCode" class="privacy-readonly-note">
           Esta ficha no tiene un correo responsable configurado. Solo el administrador puede eliminarla.
         </p>
       </v-card>
@@ -1106,10 +1110,10 @@ function getCategoryCopy(currentCategory) {
           Para confirmar, escribe <strong>{{ identifierText }}</strong>.
         </p>
         <label class="confirmation-field">
-          <span>Identificador de la ficha</span>
+          <span>Nombre visible de la ficha</span>
           <input
             v-model="deleteEntityConfirmation"
-            :maxlength="IDENTIFICATION_MAX_LENGTH"
+            :maxlength="CUSTOM_DATA_VALUE_MAX_LENGTH"
             autocomplete="off"
             :placeholder="identifierText"
           />

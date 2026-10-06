@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build"
+  command = "npm run verify:deploy"
   publish = "dist"
 
 [functions]
