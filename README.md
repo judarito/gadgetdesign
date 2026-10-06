@@ -271,9 +271,15 @@ queda registrado como JSON en los logs de la Function con `type: deploy-smoke`.
 
 Los E2E completos usan Playwright y se ejecutan manualmente antes de fusionar
 `dev` en `main`. Están bloqueados para apuntar únicamente a
-`gadgetdesign-dev.netlify.app`. La prueba administrativa crea dos fichas con el
-mismo `displayName`, comprueba que reciben URLs públicas distintas, abre ambas
-fichas y elimina los datos de prueba al terminar.
+`gadgetdesign-dev.netlify.app`. Son cuatro escenarios: el sitio expone su
+metadata; el panel permite dos fichas con el mismo `displayName` y ambas rutas
+públicas funcionan; el panel oculta una ficha, el público deja de verla y puede
+volver a publicarla; y el cliente la desactiva desde el portal. Todos limpian sus
+datos de prueba al terminar.
+
+Las lecturas públicas se abren en un contexto aparte, sin las cookies de la
+sesión: en el mismo contexto el dueño ve su ficha aunque esté desactivada —que es
+lo correcto— y no probaría lo que ve el público.
 
 Para ejecutar los E2E manualmente desde una máquina de desarrollo:
 
