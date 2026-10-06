@@ -12,6 +12,10 @@ export function verifyClientAccessCode(email, code) {
   return apiRequest('client', { action: 'verify-code', method: 'POST', body: { email, code } })
 }
 
+export function deactivateClientEntity(token) {
+  return apiRequest('client', { action: 'deactivate-entity', method: 'POST', body: { token } })
+}
+
 export function logoutClientAccess() {
   return apiRequest('client', { action: 'logout', method: 'POST', body: {} })
 }

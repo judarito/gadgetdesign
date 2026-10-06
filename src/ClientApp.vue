@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   Boxes,
   ChevronRight,
+  EyeOff,
   Copy,
   Info,
   LogOut,
@@ -14,6 +15,7 @@ import {
   X,
 } from '@lucide/vue'
 import {
+  deactivateClientEntity,
   getPortalContext,
   logoutClientAccess,
   requestClientAccessCode,
@@ -138,6 +140,23 @@ async function clearSearch() {
 function buildEntityUrl(item) {
   if (!item.shortCode) return ''
   return `${window.location.origin}/${item.shortCode}`
+}
+
+/**
+ * El cliente apaga una ficha suya. Es reversible pero no por él: volver a
+ * publicarla es del administrador, así que se avisa antes de hacerlo.
+ */
+async function deactivateEntity(item) {
+  const confirmed = window.confirm(
+    `¿Desactivar “${item.displayName}”?\n\nDejará de verse en público y su código QR no dará acceso hasta que el administrador la reactive.`,
+  )
+  if (!confirmed) return
+
+  await runAction(async () => {
+    await deactivateClientEntity(item.shortCode || item.token)
+    item.status = 'inactiva'
+    showToast(`“${item.displayName}” quedó desactivada.`)
+  })
 }
 
 async function copyUrl(item) {
@@ -360,7 +379,12 @@ function showToast(message, color = 'success') {
                 <div class="primary-cell">
                   <span class="cell-icon"><Package :size="18" /></span>
                   <div>
-                    <strong>{{ item.displayName }}</strong>
+                    <span class="item-name">
+                      <strong>{{ item.displayName }}</strong>
+                      <span v-if="item.status !== 'activa'" class="status-pill" :class="{ 'status-pill--off': item.status === 'inactiva' }">
+                        {{ item.status === 'pendiente' ? 'Pendiente de aprobación' : 'Desactivada' }}
+                      </span>
+                    </span>
                     <small>
                       {{ item.dataCount }} {{ item.dataCount === 1 ? 'dato' : 'datos' }}
                       <template v-if="item.protectedCount"> · {{ item.protectedCount }} protegido</template>
@@ -369,6 +393,16 @@ function showToast(message, color = 'success') {
                 </div>
 
                 <div class="action-cell">
+                  <button
+                    v-if="item.status === 'activa'"
+                    type="button"
+                    class="danger"
+                    aria-label="Desactivar ficha"
+                    title="Desactivar: deja de verse en público"
+                    @click="deactivateEntity(item)"
+                  >
+                    <EyeOff :size="18" />
+                  </button>
                   <button type="button" aria-label="Copiar enlace" title="Copiar enlace" @click="copyUrl(item)">
                     <Copy :size="18" />
                   </button>
@@ -570,6 +604,11 @@ button { letter-spacing: 0; }
 }
 .portal-open:hover { background: #dcecff; }
 .muted-note { overflow: hidden; color: #748298; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.item-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.status-pill { width: fit-content; padding: 4px 8px; color: #8a6415; font-size: .74rem; font-weight: 750; background: #fff7e8; border: 1px solid #f0dcb4; border-radius: 999px; }
+.status-pill--off { color: #68778b; background: #eef1f5; border-color: #dde3ea; }
+.action-cell button.danger { color: #d62d3b; background: #fff5f5; border-color: #ffd6da; }
+.action-cell button.danger:hover { color: #b21f2c; border-color: #f5aab1; }
 .pagination-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; color: #68778c; font-size: .84rem; }
 .pagination-bar :deep(.v-btn) { text-transform: none; font-weight: 700; letter-spacing: 0; }
 .portal-note {

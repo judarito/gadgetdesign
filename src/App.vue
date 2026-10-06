@@ -3,6 +3,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   AlertTriangle,
   CalendarDays,
+  EyeOff,
   LockKeyhole,
   LogOut,
   Mail,
@@ -48,6 +49,8 @@ const deleteEntityDialog = ref(false)
 const pendingDeleteItem = ref(null)
 const deleteEntityConfirmation = ref('')
 const entityDeleted = ref(false)
+// El servidor responde `unavailable` cuando la ficha existe pero no está activa.
+const unavailable = ref(false)
 const isOffline = ref(!navigator.onLine)
 const accessCode = ref('')
 const isLoading = ref(true)
@@ -363,6 +366,7 @@ async function confirmDeleteEntity() {
 
 function applyContext(context) {
   entityDeleted.value = false
+  unavailable.value = Boolean(context.unavailable)
   category.value = context.category
   entity.value = context.entity
   customData.value = context.entity?.customData || []
@@ -603,6 +607,18 @@ function getCategoryCopy(currentCategory) {
               <Trash2 :size="34" />
               <h3>Esta ficha fue eliminada</h3>
               <p>La entidad, sus datos personalizados y sus accesos asociados ya no están almacenados.</p>
+            </div>
+
+            <!-- La ficha existe pero no está activa. Se dice, en vez de dejarla
+                 pasar por «no encontrada»: este código va pegado a un objeto
+                 físico y quien lo escanee merece saber qué ocurre. -->
+            <div v-else-if="unavailable" class="unavailable-state" role="status">
+              <EyeOff :size="34" />
+              <h3>Esta ficha no está disponible</h3>
+              <p>
+                Su propietario la desactivó, así que sus datos no se muestran.
+                Si crees que debería estar activa, pídele al administrador que la reactive.
+              </p>
             </div>
 
             <template v-else>
@@ -2181,6 +2197,22 @@ function getCategoryCopy(currentCategory) {
   border-radius: 12px;
   background: #f7fbff;
 }
+
+.unavailable-state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 18px;
+  color: #6b6250;
+  text-align: center;
+  border: 1px dashed #e2d3ad;
+  border-radius: 12px;
+  background: #fffcf4;
+}
+
+.unavailable-state svg { color: #a8832f; }
+.unavailable-state h3 { margin: 0; color: #4a3d1f; }
+.unavailable-state p { max-width: 52ch; margin: 0; }
 
 .deleted-state svg {
   color: #687998;

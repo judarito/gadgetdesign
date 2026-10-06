@@ -26,6 +26,8 @@ import {
   Trash2,
   Users,
   X,
+  EyeOff,
+  Eye,
 } from '@lucide/vue'
 import {
   bulkCreateEntities,
@@ -48,6 +50,7 @@ import {
   saveCategory,
   saveClient,
   saveSuggestion,
+  setEntityStatus,
   updateEntity,
   verifyAdminPassword,
 } from './services/adminApi'
@@ -82,6 +85,7 @@ const clientPagination = ref(emptyPagination())
 const selectedCategoryId = ref(null)
 const entityCategoryId = ref(null)
 const entityClienteId = ref(null)
+const entityStatus = ref('')
 const entitySearch = ref('')
 const clientSearch = ref('')
 const isLoading = ref(false)
@@ -250,6 +254,7 @@ async function loadEntities() {
     const result = await listEntities({
       categoryId: entityCategoryId.value,
       clienteId: entityClienteId.value,
+      status: entityStatus.value,
       search: entitySearch.value,
       page: entityPagination.value.page,
     })
@@ -487,6 +492,21 @@ async function regenerateToken(entity) {
     entity.token = access.token
     entity.shortCode = access.shortCode
     notifySuccess('Token y URL regenerados.')
+  })
+}
+
+/**
+ * Publicar o retirar una ficha. Es lo único que devuelve al público lo que el
+ * cliente desactivó, y lo que aprobará lo que el cliente cree en la fase 2.
+ */
+async function toggleEntityStatus(entity) {
+  const next = entity.status === 'activa' ? 'inactiva' : 'activa'
+  await runAction(async () => {
+    await setEntityStatus(entity.id, next)
+    await loadEntities()
+    notifySuccess(next === 'activa'
+      ? `“${entity.displayName}” vuelve a verse en público.`
+      : `“${entity.displayName}” quedó oculta al público.`)
   })
 }
 
@@ -945,6 +965,15 @@ function emptyPagination() {
                   </option>
                 </select>
               </label>
+              <label class="filter-field">
+                <span>Estado</span>
+                <select v-model="entityStatus">
+                  <option value="">Todos los estados</option>
+                  <option value="activa">Publicadas</option>
+                  <option value="pendiente">Pendientes de aprobar</option>
+                  <option value="inactiva">Desactivadas</option>
+                </select>
+              </label>
               <label class="filter-field search-field">
                 <span>Buscar</span>
                 <div><Search :size="18" /><input v-model="entitySearch" maxlength="200" placeholder="Nombre visible, código o cliente" /></div>
@@ -959,7 +988,12 @@ function emptyPagination() {
                 <div class="entity-identity">
                   <span class="cell-icon"><Users :size="18" /></span>
                   <div>
-                    <strong>{{ entity.displayName }}</strong>
+                    <span class="entity-name">
+                      <strong>{{ entity.displayName }}</strong>
+                      <span v-if="entity.status !== 'activa'" class="status-pill" :class="{ 'status-pill--off': entity.status === 'inactiva' }">
+                        {{ entity.status === 'pendiente' ? 'Pendiente' : 'Desactivada' }}
+                      </span>
+                    </span>
                     <span>{{ entity.categoryName }} · {{ entity.categoryCode }}</span>
                     <span v-if="entity.clientName">{{ entity.clientName }} · {{ entity.clientEmail }}</span>
                     <span v-else class="muted-note">Sin cliente asignado</span>
@@ -975,6 +1009,13 @@ function emptyPagination() {
                   <button type="button" title="Copiar URL" @click="copyUrl(entity)"><Copy :size="18" /></button>
                   <button type="button" title="Editar" @click="openEntityDialog(entity)"><Pencil :size="18" /></button>
                   <button type="button" title="Regenerar acceso y URL" @click="regenerateToken(entity)"><RefreshCw :size="18" /></button>
+                  <button
+                    type="button"
+                    :title="entity.status === 'activa' ? 'Ocultar al público' : 'Publicar'"
+                    @click="toggleEntityStatus(entity)"
+                  >
+                    <component :is="entity.status === 'activa' ? EyeOff : Eye" :size="18" />
+                  </button>
                   <button type="button" class="danger" title="Eliminar" @click="removeEntity(entity)"><Trash2 :size="18" /></button>
                 </div>
               </article>
@@ -1376,6 +1417,7 @@ button { letter-spacing: 0; }
 .table-row code { width: fit-content; padding: 4px 7px; color: #264b7c; background: #eef4fa; border-radius: 4px; }
 .status-pill { width: fit-content; padding: 5px 8px; color: #157255; font-size: .78rem; font-weight: 750; background: #e7f7f0; border-radius: 999px; }
 .status-pill--off { color: #68778b; background: #edf1f5; }
+.entity-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .action-cell { display: flex; justify-content: flex-end; gap: 6px; }
 .action-cell button { display: grid; width: 34px; height: 34px; place-items: center; color: #3f5f86; background: #fff; border: 1px solid #d8e2ed; border-radius: 6px; cursor: pointer; }
 .action-cell button:hover { color: #0873ff; border-color: #9fc8f9; }
