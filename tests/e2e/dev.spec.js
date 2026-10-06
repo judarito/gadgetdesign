@@ -246,6 +246,10 @@ test('el cliente desactiva su ficha desde el portal', async ({ page }) => {
     await expect(oculta.getByText('Esta ficha no está disponible')).toBeVisible()
     await contextoOculta.close()
 
+    // El dueño sí entra, y la propia página le avisa de que el público no la ve.
+    await page.goto(`/${shortCode}`)
+    await expect(page.locator('.owner-status-banner')).toContainText('desactivada')
+
     // El panel la vuelve a publicar.
     const encontradas = await (await api.get(
       `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,

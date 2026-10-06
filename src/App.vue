@@ -615,13 +615,35 @@ function getCategoryCopy(currentCategory) {
             <div v-else-if="unavailable" class="unavailable-state" role="status">
               <EyeOff :size="34" />
               <h3>Esta ficha no está disponible</h3>
+              <!-- El servidor no dice si está pendiente o desactivada, a propósito:
+                   el público solo necesita saber que ahora mismo no se muestra. Una
+                   ficha pendiente no la desactivó nadie, así que no se afirma eso. -->
               <p>
-                Su propietario la desactivó, así que sus datos no se muestran.
-                Si crees que debería estar activa, pídele al administrador que la reactive.
+                Ahora mismo sus datos no se muestran. Si crees que debería estar
+                disponible, pídele al administrador que la publique.
               </p>
             </div>
 
             <template v-else>
+              <!-- El dueño ve y edita una ficha no activa, pero tiene que saber que el
+                   público no la está viendo: si no, la editaría creyendo que está
+                   publicada. Solo aparece con sesión, que es quien puede verla. -->
+              <div
+                v-if="entity && entity.status !== 'activa' && !isLoading"
+                class="owner-status-banner"
+                role="status"
+              >
+                <EyeOff :size="20" />
+                <span v-if="entity.status === 'pendiente'">
+                  Esta ficha está <strong>pendiente de aprobación</strong>: todavía no se ve en
+                  público. El administrador tiene que aprobarla.
+                </span>
+                <span v-else>
+                  Esta ficha está <strong>desactivada</strong>: el público no la ve. El
+                  administrador tiene que volver a publicarla.
+                </span>
+              </div>
+
               <div v-if="entity && !isLoading" class="access-panel" :class="{ 'access-panel--verified': auth.authorized }">
               <component :is="auth.authorized ? ShieldCheck : LockKeyhole" :size="22" />
               <div>
@@ -1578,6 +1600,20 @@ function getCategoryCopy(currentCategory) {
   height: 42px;
   border-radius: 10px;
 }
+
+.owner-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 13px 15px;
+  color: #6b6250;
+  background: #fffcf4;
+  border: 1px solid #e2d3ad;
+  border-radius: 10px;
+}
+
+.owner-status-banner svg { flex: 0 0 auto; color: #a8832f; }
 
 .access-panel {
   display: grid;
