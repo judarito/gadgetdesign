@@ -112,6 +112,18 @@ Ejecútala de forma controlada antes de desplegar cambios de esquema. Para
 apuntarla a la base de pruebas, exporta antes `.env.dev.local` como se explica
 en [Entorno de pruebas](#entorno-de-pruebas-rama-dev).
 
+Hacia una base que no parece de pruebas —no es un archivo local ni contiene
+`-dev`— el script **se niega a ejecutarse salvo que la nombres**, para que el
+destino no se dé por supuesto:
+
+```sh
+CONFIRM_TARGET=gadgetdesign-jricardo npm run setup:admin
+```
+
+No es paranoia: ya se ejecutó una vez creyendo que probaba en local y se aplicó a
+producción. Salió bien porque el cambio era aditivo, pero el destino no debería
+depender de leer una línea de la salida.
+
 ### Retirar las columnas heredadas del propietario
 
 El dueño de una ficha vive ahora en `Clientes`. Las columnas
@@ -123,6 +135,10 @@ cuando ya corre el código que lee el dueño en `Clientes`:
 npm run setup:admin          # aditivo: crea Clientes y vincula las fichas
 npm run setup:drop-legacy    # destructivo: elimina las columnas heredadas
 ```
+
+En producción, el primero exige nombrar el destino (ver
+[Migraciones de esquema](#migraciones-de-esquema)); el segundo, la confirmación
+`CONFIRM_DESTRUCTIVE`.
 
 El orden importa, y el script se protege solo: se niega a borrar si encuentra
 una ficha con correo heredado y sin cliente vinculado, y recrea antes los

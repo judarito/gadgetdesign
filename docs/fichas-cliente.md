@@ -3,6 +3,10 @@
 Diseño previo a la implementación. Añade un **estado** a la ficha para que el
 cliente pueda gobernar las suyas sin poder publicar por su cuenta.
 
+> **Estado:** fase 1 en curso. Hecho el esquema (columna, índice, trigger de
+> validación y migración aditiva con `activa` por defecto). Pendiente el backend y
+> las dos interfaces.
+
 ## 1. Qué resuelve
 
 Hoy una ficha es pública desde que existe y solo el administrador decide sobre
@@ -72,8 +76,9 @@ ALTER TABLE Entidades ADD COLUMN status TEXT NOT NULL DEFAULT 'activa'
 - Índice para el listado del administrador: `idx_entidades_status`.
 - Triggers en `applyDataIntegrityConstraints` para que `status` solo admita los
   tres valores; SQLite no permite añadir un `CHECK` con `ALTER TABLE`.
-- `setupLocal.mjs` crea la columna y siembra los tres estados, para que la suite
-  pueda probarlos.
+- `setupLocal.mjs` crea la columna y el índice en la base local. Los ejemplos de
+  fichas no activas los crea **cada prueba**, no la semilla: sembrarlos cambiaría
+  los recuentos que la suite ya verifica sobre el cliente de prueba.
 - Al cambiar de estado **nunca** se toca `short_code` ni `token`: el QR ya
   impreso tiene que seguir sirviendo al reactivar.
 
