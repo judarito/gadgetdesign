@@ -16,6 +16,12 @@ process.env.LOCAL_TURSO_URL = localTursoUrl
 // La caché de CDN solo se activa si hay con qué invalidarla. El servidor de
 // pruebas corre con un token ficticio para poder comprobar el camino cacheado;
 // el camino sin token se comprueba más abajo, llamando al módulo directamente.
+// El build de Netlify hereda las variables del sitio, y el sitio de pruebas tiene
+// OTP_DEV_HINT=true para mostrar el código en pantalla. Aquí se prueba el camino
+// por defecto, así que se borra en lugar de heredarla: si no, la suite afirmaría
+// algo que depende del entorno donde corre.
+delete process.env.OTP_DEV_HINT
+
 process.env.NETLIFY_PURGE_API_TOKEN ??= 'token-de-prueba'
 process.env.NETLIFY_LOCAL ??= 'true'
 
