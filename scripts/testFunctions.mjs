@@ -22,6 +22,14 @@ process.env.LOCAL_TURSO_URL = localTursoUrl
 // algo que depende del entorno donde corre.
 delete process.env.OTP_DEV_HINT
 
+// El envío de códigos también se impone, y no se hereda nunca. El build de
+// producción trae OTP_DELIVERY_MODE=resend y su clave de Resend, así que sin
+// esto la suite pediría códigos de verdad durante el build: se enviarían correos
+// reales a direcciones inventadas y, si Resend los rechaza, el build falla y el
+// despliegue se cancela. Las pruebas no mandan correos: se quedan en consola.
+process.env.OTP_DELIVERY_MODE = 'console'
+delete process.env.RESEND_API_KEY
+
 process.env.NETLIFY_PURGE_API_TOKEN ??= 'token-de-prueba'
 process.env.NETLIFY_LOCAL ??= 'true'
 
