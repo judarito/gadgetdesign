@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Contact,
   Copy,
-  Download,
   KeyRound,
   Layers,
   Lightbulb,
@@ -543,17 +542,6 @@ function openPrintDialog(entity) {
   printSettings.value = defaultPrintSettings()
   printDialog.value = true
   qrDialog.value = false
-}
-
-function updateQrSize(event) {
-  const size = Number(event.currentTarget.value)
-  if (Number.isFinite(size) && size >= 10 && size <= 200) {
-    printSettings.value.qrSizeMm = size
-  }
-}
-
-function restoreQrSize(event) {
-  event.currentTarget.value = String(printSettings.value.qrSizeMm)
 }
 
 async function downloadPrintSvg() {
@@ -1240,116 +1228,6 @@ function emptyPagination() {
       @download-svg="downloadPrintSvg"
       @download-stl="downloadPrintStl"
     />
-
-    <v-dialog v-if="false" v-model="printDialog" max-width="760">
-      <v-card class="admin-dialog print-dialog">
-        <div class="dialog-header">
-          <div><Printer :size="21" /><h2>Preparar impresión 3D</h2></div>
-          <button type="button" aria-label="Cerrar" @click="printDialog = false"><X :size="21" /></button>
-        </div>
-        <div v-if="printEntity && printMetrics" class="print-content">
-          <div class="print-summary">
-            <div>
-              <span>Entidad</span>
-              <strong>{{ printEntity.displayName }}</strong>
-            </div>
-            <div>
-              <span>Impresora</span>
-              <strong>FlashForge AD5X</strong>
-            </div>
-            <div>
-              <span>URL corta</span>
-              <code>{{ buildEntityUrl(printEntity) }}</code>
-            </div>
-          </div>
-
-          <div class="print-controls">
-            <label class="field">
-              <span>Formato</span>
-              <select v-model="printSettings.format">
-                <option value="plate">Placa</option>
-                <option value="keychain">Llavero con orificio</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Tamaño del QR</span>
-              <input
-                :value="printSettings.qrSizeMm"
-                type="number"
-                inputmode="decimal"
-                min="10"
-                max="200"
-                step="1"
-                list="qr-print-sizes"
-                aria-label="Tamaño del QR en milímetros"
-                @input="updateQrSize"
-                @blur="restoreQrSize"
-              />
-              <datalist id="qr-print-sizes">
-                <option value="26"></option>
-                <option value="50"></option>
-                <option value="60"></option>
-                <option value="80"></option>
-              </datalist>
-            </label>
-            <label class="field">
-              <span>Boquilla</span>
-              <select v-model.number="printSettings.nozzleMm">
-                <option :value="0.25">0.25 mm · opcional</option>
-                <option :value="0.4">0.4 mm · instalada de fábrica</option>
-                <option :value="0.6">0.6 mm · opcional</option>
-                <option :value="0.8">0.8 mm · opcional</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Grosor de la base</span>
-              <select v-model.number="printSettings.baseHeightMm">
-                <option :value="1.6">1.6 mm</option>
-                <option :value="2">2.0 mm</option>
-                <option :value="2.4">2.4 mm</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Altura del relieve</span>
-              <select v-model.number="printSettings.reliefHeightMm">
-                <option :value="0.6">0.6 mm</option>
-                <option :value="0.8">0.8 mm</option>
-                <option :value="1.2">1.2 mm</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="print-metrics" :class="{ 'print-metrics--warning': !printMetrics.isPrintable }">
-            <Printer :size="22" />
-            <div>
-              <strong>{{ printMetrics.isPrintable ? 'Configuración lista para imprimir' : 'Módulos demasiado pequeños' }}</strong>
-              <span>
-                {{ printMetrics.modelWidthMm.toFixed(1) }} × {{ printMetrics.modelHeightMm.toFixed(1) }} mm ·
-                módulo {{ printMetrics.moduleSizeMm.toFixed(2) }} mm ·
-                recomendado {{ printMetrics.recommendedModuleMm.toFixed(2) }} mm o más
-              </span>
-              <span v-if="!printMetrics.isPrintable">
-                Puedes descargar el modelo, pero conviene usar una boquilla más fina o aumentar el tamaño del QR.
-              </span>
-            </div>
-          </div>
-
-          <p class="print-note">
-            Perfil preparado para FlashForge AD5X (cama de 220 × 220 mm). Importa el STL en
-            Orca-Flashforge y asigna otro color al relieve o programa el cambio de filamento al comenzar el QR.
-          </p>
-
-          <div class="print-actions">
-            <v-btn variant="tonal" :disabled="isSaving" @click="downloadPrintSvg">
-              <Download :size="18" /> Descargar SVG
-            </v-btn>
-            <v-btn color="primary" variant="flat" :loading="isSaving" @click="downloadPrintStl">
-              <Download :size="18" /> Descargar STL
-            </v-btn>
-          </div>
-        </div>
-      </v-card>
-    </v-dialog>
 
     <v-snackbar
       v-model="toast.visible"
