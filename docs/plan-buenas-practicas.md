@@ -76,7 +76,7 @@ contra `gadgetdesign-dev-jricardo`; las E2E remotas seleccionadas pasaron 3/3.
 - [ ] Añadir chequeo de tipos o, si se mantiene JavaScript, una validacion
   equivalente de imports y sintaxis.
 - [ ] Añadir `npm run verify` que ejecute lint, Functions, smoke test y build.
-- [ ] Configurar el mismo comando para el PR de `dev` hacia `main`.
+- [x] Configurar el mismo comando para el PR de `dev` hacia `main`.
 - [ ] Corregir advertencias reales sin hacer una refactorizacion masiva.
 
 **Aceptacion:** `npm run verify` termina sin errores y puede ejecutarse desde
@@ -88,9 +88,9 @@ vacío y documentar una expresión regular que elimina caracteres de control.
 El runner acepta `VITE_PORT` y `NETLIFY_FUNCTIONS_PORT` para evitar conflictos
 con otra instancia local. El 2026-10-10 `VITE_PORT=5174
 NETLIFY_FUNCTIONS_PORT=10001 npm run verify` pasó completo: lint, sintaxis en
-34 archivos, Functions, smoke post-deploy y build. La ejecución del mismo
-comando en CI/PR queda pendiente para el bloque 6, junto con la decisión del
-flujo de integración del repositorio.
+34 archivos, Functions, smoke post-deploy y build. El mismo comando queda
+configurado en `.github/workflows/verify.yml` para PRs hacia `main` y pushes a
+`dev`; usa `npm ci` y no requiere secretos ni acceso a Turso remoto.
 
 ## Bloque 3: seguridad y errores
 
