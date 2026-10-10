@@ -58,6 +58,7 @@ import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
 import Print3dDialog from './components/Print3dDialog.vue'
+import QrPreviewDialog from './components/QrPreviewDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1199,24 +1200,13 @@ function emptyPagination() {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="qrDialog" max-width="460">
-      <v-card class="admin-dialog qr-dialog">
-        <div class="dialog-header">
-          <div><QrCodeIcon :size="21" /><h2>Código QR</h2></div>
-          <button type="button" aria-label="Cerrar" @click="qrDialog = false"><X :size="21" /></button>
-        </div>
-        <div v-if="qrEntity" class="qr-content">
-          <img :src="qrImageUrl" :alt="`Código QR de ${qrEntity.displayName}`" />
-          <div>
-            <strong>{{ qrEntity.displayName }}</strong>
-            <a :href="buildEntityUrl(qrEntity)" target="_blank">{{ buildEntityUrl(qrEntity) }}</a>
-          </div>
-          <v-btn color="primary" variant="flat" @click="openPrintDialog(qrEntity)">
-            <Printer :size="18" /> Preparar impresión 3D
-          </v-btn>
-        </div>
-      </v-card>
-    </v-dialog>
+    <QrPreviewDialog
+      v-model="qrDialog"
+      :entity="qrEntity"
+      :image-url="qrImageUrl"
+      :entity-url="qrEntity ? buildEntityUrl(qrEntity) : ''"
+      @prepare-print="openPrintDialog"
+    />
 
     <Print3dDialog
       v-model="printDialog"
@@ -1357,12 +1347,6 @@ button { letter-spacing: 0; }
 .url-preview { display: grid; gap: 7px; padding: 13px; background: #f4f7fa; border: 1px solid #dce5ef; border-radius: 6px; }
 .url-preview span { color: #68778c; font-size: .8rem; font-weight: 750; }
 .url-preview code { overflow-wrap: anywhere; color: #174b88; }
-.qr-content { display: grid; justify-items: center; gap: 18px; padding: 22px; }
-.qr-content img { width: min(100%, 320px); aspect-ratio: 1; object-fit: contain; background: #fff; border: 1px solid #dce5ef; border-radius: 6px; }
-.qr-content > div { display: grid; gap: 5px; max-width: 100%; text-align: center; }
-.qr-content a { max-width: 100%; color: #096bdc; font-size: .84rem; overflow-wrap: anywhere; }
-.qr-content :deep(.v-btn) { text-transform: none; font-weight: 700; letter-spacing: 0; }
-.qr-content :deep(.v-btn__content) { gap: 8px; }
 .print-content { display: grid; gap: 20px; padding: 22px; }
 .print-summary { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1fr); gap: 14px; padding: 14px; background: #f4f7fa; border: 1px solid #dce5ef; border-radius: 7px; }
 .print-summary > div { display: grid; gap: 4px; min-width: 0; }
