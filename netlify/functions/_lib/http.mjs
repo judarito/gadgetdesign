@@ -32,7 +32,12 @@ export function handleError(error) {
     ? 'Ocurrió un error interno. Inténtalo nuevamente.'
     : error.message
 
-  if (status >= 500) console.error(error)
+  if (status >= 500) {
+    console.error('Internal function error', {
+      name: error?.name || 'Error',
+      status,
+    })
+  }
   return json({ error: message }, status)
 }
 

@@ -79,7 +79,9 @@ async function purgeTags(tags) {
   } catch (error) {
     // La escritura ya fue confirmada en Turso. Mientras la purga falle, el TTL
     // es lo único que impide servir la versión vieja.
-    console.error(`No fue posible invalidar las etiquetas de caché: ${tags.join(', ')}`, error)
+    console.error(`No fue posible invalidar las etiquetas de caché: ${tags.join(', ')}`, {
+      name: error?.name || 'Error',
+    })
   }
 }
 

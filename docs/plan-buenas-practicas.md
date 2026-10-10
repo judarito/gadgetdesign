@@ -16,7 +16,7 @@ proyecto antes de fusionar cambios a `main`.
 - [x] Bloque 0: linea base y herramientas.
 - [x] Bloque 1: invalidacion de sesiones administrativas.
 - [x] Bloque 2: calidad estatica y scripts de validacion.
-- [ ] Bloque 3: seguridad y manejo de errores.
+- [x] Bloque 3: seguridad y manejo de errores.
 - [ ] Bloque 4: modularizacion gradual del frontend.
 - [ ] Bloque 5: cobertura E2E y aislamiento de datos.
 - [ ] Bloque 6: documentacion y preparacion del PR.
@@ -112,8 +112,10 @@ Avance 2026-10-10: `readJson` limita los cuerpos JSON a 256 KiB y devuelve
 contra filtración de mensajes internos en respuestas `5xx`. También se
 verificaron `no-store`, datos protegidos ausentes en la respuesta pública,
 anti-enumeración y autorización de las rutas mediante `testFunctions.mjs`.
-La suite pasó con los puertos locales alternativos. El bloque sigue abierto
-para revisar manualmente los endpoints restantes y documentar el inventario.
+El inventario manual confirmó que `health` y el contexto público son las únicas
+rutas anónimas; las mutaciones de ficha, portal y panel exigen sus sesiones.
+Los logs de errores 5xx y de purga ya no imprimen objetos de error completos.
+La suite pasó con los puertos locales alternativos.
 
 ## Bloque 4: modularizacion gradual del frontend
 
@@ -164,7 +166,7 @@ esta verde y toda migracion tiene instrucciones de rollback o recuperacion.
 | 2026-10-10 | 0 | Completado | `npm run test:functions`, `npm run test:deploy-smoke`, `npm run build`, `git diff --check` | `90a81be` | Codex |
 | 2026-10-10 | 1 | Completado | Rotacion de contraseña, rechazo de cookie anterior, migracion local/dev y E2E remotas 3/3 | `5fdfed3` | Codex |
 | 2026-10-10 | 2 | Completado | `VITE_PORT=5174 NETLIFY_FUNCTIONS_PORT=10001 npm run verify` | Pendiente | Codex |
-| 2026-10-10 | 3 | En progreso | `413`, errores `5xx` genéricos, `no-store`, datos protegidos y autorización verificados; inventario manual pendiente | Pendiente | Codex |
+| 2026-10-10 | 3 | Completado | `413`, errores `5xx` genéricos, logs sin objetos sensibles, `no-store`, datos protegidos y autorización verificados | Pendiente | Codex |
 |  | 1 |  |  |  |  |
 |  | 2 |  |  |  |  |
 |  | 3 |  |  |  |  |
