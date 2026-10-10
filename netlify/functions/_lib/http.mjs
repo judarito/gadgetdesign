@@ -5,6 +5,8 @@ export class HttpError extends Error {
   }
 }
 
+const MAX_JSON_BODY_BYTES = 256 * 1024
+
 export function json(data, status = 200, headers = {}) {
   const merged = new Headers({
     'content-type': 'application/json; charset=utf-8',
@@ -35,8 +37,22 @@ export function handleError(error) {
 }
 
 export async function readJson(request) {
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BODY_BYTES) {
+    throw new HttpError(413, 'La solicitud es demasiado grande.')
+  }
+
+  let raw
   try {
-    return await request.json()
+    raw = await request.text()
+  } catch {
+    throw new HttpError(400, 'La solicitud no tiene un formato válido.')
+  }
+  if (new TextEncoder().encode(raw).byteLength > MAX_JSON_BODY_BYTES) {
+    throw new HttpError(413, 'La solicitud es demasiado grande.')
+  }
+  try {
+    return JSON.parse(raw)
   } catch {
     throw new HttpError(400, 'La solicitud no tiene un formato válido.')
   }

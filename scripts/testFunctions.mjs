@@ -100,6 +100,9 @@ try {
   await expectStatus(() => request('entity', 'create-data', {
     method: 'POST', body: { ...route, data: { key: 'Sin permiso', value: 'No', dataType: 'text' } },
   }), 401, 'El CRUD público debe exigir autorización.')
+  await expectStatus(() => request('entity', 'create-data', {
+    method: 'POST', body: { payload: 'x'.repeat(270 * 1024) },
+  }), 413, 'Un payload JSON demasiado grande debe rechazarse antes de procesarse.')
   await expectStatus(() => request('entity', 'context', { query: { token: "' OR 1=1 --" } }), 400,
     'Una ruta inválida debe rechazarse sin ejecutar SQL.')
 
