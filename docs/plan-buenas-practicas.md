@@ -14,7 +14,7 @@ proyecto antes de fusionar cambios a `main`.
 ## Estado rapido
 
 - [x] Bloque 0: linea base y herramientas.
-- [ ] Bloque 1: invalidacion de sesiones administrativas.
+- [x] Bloque 1: invalidacion de sesiones administrativas.
 - [ ] Bloque 2: calidad estatica y scripts de validacion.
 - [ ] Bloque 3: seguridad y manejo de errores.
 - [ ] Bloque 4: modularizacion gradual del frontend.
@@ -64,10 +64,10 @@ afecta las pruebas del proyecto. El plan nuevo aun no esta committeado.
 **Aceptacion:** una cookie administrativa emitida antes del cambio de
 contraseña recibe `401`; una cookie nueva funciona correctamente.
 
-Implementado y verificado en la base local el 2026-10-10: la prueba rota la
-contraseña, rechaza la cookie anterior, inicia sesión con la nueva y restaura
-la contraseña de pruebas. Falta aplicar la migracion en `gadgetdesign-dev`
-despues de subir el cambio y repetir allí la prueba remota.
+Implementado y verificado localmente y en `gadgetdesign-dev` el 2026-10-10.
+La prueba rota la contraseña, rechaza la cookie anterior, inicia sesión con la
+nueva y restaura la contraseña de pruebas. La migracion idempotente se aplico
+contra `gadgetdesign-dev-jricardo`; las E2E remotas seleccionadas pasaron 3/3.
 
 ## Bloque 2: calidad estatica y validacion automatica
 
@@ -155,6 +155,9 @@ esta verde y toda migracion tiene instrucciones de rollback o recuperacion.
 
 - La invalidacion de sesiones administrativas es prioritaria porque reduce el
   riesgo de acceso persistente despues de una rotacion de contraseña.
+- 2026-10-10: commit `90a81be` subido a `dev`; migracion de `session_version`
+  aplicada en Turso dev; smoke E2E remoto de deploy, QR y aprobacion pendiente
+  paso 3/3.
 - La modularizacion se hara despues de cubrir comportamiento, para evitar que
   una refactorizacion grande oculte regresiones.
 - Los modos de prueba para OTP deben estar limitados a `dev` y no devolver
