@@ -7,6 +7,8 @@ import { clearCookie, sessionCookie } from '../netlify/functions/_lib/http.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const localTursoUrl = env.LOCAL_TURSO_URL || 'file:/tmp/gadgetdesign-local.db'
+const localAppPort = Number(process.env.VITE_PORT || 5173)
+const localAppUrl = `http://localhost:${localAppPort}`
 
 // El build de Netlify expone TURSO_URL pero no lee los .env locales. Fijar esta
 // variable antes de iniciar Functions evita que la suite escriba en una base
@@ -757,7 +759,7 @@ try {
 }
 
 async function request(endpoint, action, options = {}) {
-  const url = new URL(`http://localhost:5173/.netlify/functions/${endpoint}`)
+  const url = new URL(`${localAppUrl}/.netlify/functions/${endpoint}`)
   url.searchParams.set('action', action)
   for (const [key, value] of Object.entries(options.query || {})) url.searchParams.set(key, value)
   const response = await fetch(url, {
@@ -777,11 +779,13 @@ async function request(endpoint, action, options = {}) {
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
-      const response = await fetch('http://localhost:5173/.netlify/functions/admin?action=session', {
+      const response = await fetch(`${localAppUrl}/.netlify/functions/admin?action=session`, {
         signal: AbortSignal.timeout(1000),
       })
       if (response.ok) return
-    } catch {}
+    } catch {
+      // El servidor puede tardar en estar listo durante el arranque local.
+    }
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   throw new Error(`El entorno local no inició.\n${logs.slice(-4000)}`)

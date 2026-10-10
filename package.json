@@ -15,7 +15,8 @@
     "test:deploy-smoke": "node scripts/testDeploySmoke.mjs",
     "test:e2e": "playwright test",
     "check:syntax": "node scripts/checkSyntax.mjs",
-    "verify": "npm run check:syntax && npm run test:functions && npm run test:deploy-smoke && npm run build",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .netlify --ignore-pattern node_modules",
+    "verify": "npm run lint && npm run check:syntax && npm run test:functions && npm run test:deploy-smoke && npm run build",
     "setup:admin": "node scripts/setupAdmin.mjs",
     "setup:drop-legacy": "node scripts/dropLegacyOwnerColumns.mjs"
   },
@@ -29,9 +30,14 @@
     "vuetify": "^4.2.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.9",
+    "eslint": "^10.12.0",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
     "netlify-cli": "^27.10.1",
     "vite": "^8.3.1",
-    "vite-plugin-vuetify": "^2.1.3"
+    "vite-plugin-vuetify": "^2.1.3",
+    "vue-eslint-parser": "^10.4.1"
   }
 }

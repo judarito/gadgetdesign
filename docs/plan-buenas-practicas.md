@@ -15,7 +15,7 @@ proyecto antes de fusionar cambios a `main`.
 
 - [x] Bloque 0: linea base y herramientas.
 - [x] Bloque 1: invalidacion de sesiones administrativas.
-- [ ] Bloque 2: calidad estatica y scripts de validacion.
+- [x] Bloque 2: calidad estatica y scripts de validacion.
 - [ ] Bloque 3: seguridad y manejo de errores.
 - [ ] Bloque 4: modularizacion gradual del frontend.
 - [ ] Bloque 5: cobertura E2E y aislamiento de datos.
@@ -82,11 +82,15 @@ contra `gadgetdesign-dev-jricardo`; las E2E remotas seleccionadas pasaron 3/3.
 **Aceptacion:** `npm run verify` termina sin errores y puede ejecutarse desde
 una instalacion limpia.
 
-Se añadió `npm run check:syntax` y `npm run verify` como validacion disponible
-sin dependencias nuevas. La instalacion de ESLint quedo bloqueada por la
-descarga de paquetes en este entorno y sigue pendiente para cerrar el bloque.
-El 2026-10-10 `npm run verify` paso completo: sintaxis en 34 archivos,
-Functions, smoke post-deploy y build.
+Se añadieron ESLint para Vue 3, `npm run lint`, `npm run check:syntax` y
+`npm run verify`. La suite quedó limpia después de corregir un bloque `catch`
+vacío y documentar una expresión regular que elimina caracteres de control.
+El runner acepta `VITE_PORT` y `NETLIFY_FUNCTIONS_PORT` para evitar conflictos
+con otra instancia local. El 2026-10-10 `VITE_PORT=5174
+NETLIFY_FUNCTIONS_PORT=10001 npm run verify` pasó completo: lint, sintaxis en
+34 archivos, Functions, smoke post-deploy y build. La ejecución del mismo
+comando en CI/PR queda pendiente para el bloque 6, junto con la decisión del
+flujo de integración del repositorio.
 
 ## Bloque 3: seguridad y errores
 
@@ -151,7 +155,7 @@ esta verde y toda migracion tiene instrucciones de rollback o recuperacion.
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-10 | 0 | Completado | `npm run test:functions`, `npm run test:deploy-smoke`, `npm run build`, `git diff --check` | `90a81be` | Codex |
 | 2026-10-10 | 1 | Completado | Rotacion de contraseña, rechazo de cookie anterior, migracion local/dev y E2E remotas 3/3 | `5fdfed3` | Codex |
-| 2026-10-10 | 2 | Parcial | `npm run check:syntax` y `npm run verify` pasan; ESLint pendiente por descarga bloqueada | Pendiente | Codex |
+| 2026-10-10 | 2 | Completado | `VITE_PORT=5174 NETLIFY_FUNCTIONS_PORT=10001 npm run verify` | Pendiente | Codex |
 |  | 1 |  |  |  |  |
 |  | 2 |  |  |  |  |
 |  | 3 |  |  |  |  |

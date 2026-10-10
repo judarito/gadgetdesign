@@ -8,6 +8,7 @@ export const CUSTOM_DATA_KEY_MAX_LENGTH = 50
 export const CUSTOM_DATA_JSON_MAX_LENGTH = 5000
 
 const ROUTE_VALUE_PATTERN = /^[A-Za-z0-9_-]+$/
+// eslint-disable-next-line no-control-regex -- La validacion elimina precisamente estos caracteres.
 const CONTROL_CHARS_PATTERN = /[\u0000-\u001f\u007f-\u009f]/g
 const INVISIBLE_CHARS_PATTERN = /[\u200b-\u200d\u2060\ufeff]/g
 
