@@ -32,6 +32,17 @@ if (!esDestinoDePruebas && process.env.CONFIRM_TARGET !== host) {
 
 const db = createClient({ url, authToken })
 
+const resetAdminPassword = process.env.RESET_ADMIN_PASSWORD === 'true'
+const configuredAdminPassword = env.DEV_ADMIN_PASSWORD || process.env.DEV_ADMIN_PASSWORD
+
+if (resetAdminPassword && !esDestinoDePruebas) {
+  throw new Error('RESET_ADMIN_PASSWORD solo se permite contra una base de pruebas.')
+}
+
+if (resetAdminPassword && !configuredAdminPassword) {
+  throw new Error('Falta DEV_ADMIN_PASSWORD para actualizar la contraseña administrativa.')
+}
+
 await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   password_hash TEXT NOT NULL,
@@ -311,7 +322,20 @@ await applyDataIntegrityConstraints(db)
 
 const existing = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1 LIMIT 1')
 
-if (existing.rows.length) {
+if (existing.rows.length && resetAdminPassword) {
+  const salt = randomBytes(16)
+  const iterations = 210000
+  const passwordHash = pbkdf2Sync(configuredAdminPassword, salt, iterations, 32, 'sha256').toString('hex')
+
+  await db.execute({
+    sql: `UPDATE AdminCredentials
+          SET password_hash = ?, salt = ?, iterations = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1`,
+    args: [passwordHash, salt.toString('hex'), iterations],
+  })
+
+  console.log('Contraseña administrativa actualizada desde DEV_ADMIN_PASSWORD.')
+} else if (existing.rows.length) {
   console.log('La credencial administrativa ya existe. No se modificó la contraseña.')
 } else {
   const temporaryPassword = randomBytes(15).toString('base64url')
