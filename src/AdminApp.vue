@@ -63,6 +63,7 @@ import CategoryDialog from './components/CategoryDialog.vue'
 import SuggestionDialog from './components/SuggestionDialog.vue'
 import EntityDialog from './components/EntityDialog.vue'
 import ClientDialog from './components/ClientDialog.vue'
+import BulkEntityDialog from './components/BulkEntityDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1108,43 +1109,7 @@ function emptyPagination() {
 
     <ClientDialog v-model="clientDialog" :draft="clientDraft" :is-saving="isSaving" @submit="submitClient" />
 
-    <v-dialog v-model="bulkDialog" max-width="620">
-      <v-card class="admin-dialog">
-        <div class="dialog-header"><div><Layers :size="21" /><h2>Crear fichas por rango</h2></div><button type="button" @click="bulkDialog = false"><X :size="21" /></button></div>
-        <form @submit.prevent="submitBulk">
-          <p class="dialog-hint">Pensado para lotes: 100 vacas, 40 motos. Cada ficha recibe su propio código corto y su QR.</p>
-          <label class="field"><span>Categoría</span><select v-model="bulkDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
-          <label class="field">
-            <span>Cliente <small>Opcional</small></span>
-            <select v-model="bulkDraft.clienteId">
-              <option :value="null">Sin cliente (solo lectura)</option>
-              <option v-for="client in clients" :key="client.id" :value="client.id">{{ client.name }} · {{ client.email }}</option>
-              <option value="new">＋ Nuevo cliente…</option>
-            </select>
-          </label>
-          <template v-if="bulkDraft.clienteId === 'new'">
-            <label class="field"><span>Nombre del cliente</span><input v-model="bulkDraft.newClient.name" maxlength="100" placeholder="Ej. Finca El Paraíso" /></label>
-            <label class="field"><span>Correo de acceso</span><input v-model="bulkDraft.newClient.email" maxlength="254" type="email" placeholder="finca@correo.com" /></label>
-            <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="bulkDraft.newClient.phone" maxlength="30" type="tel" placeholder="Ej. +57 300 000 0000" /></label>
-          </template>
-          <label class="field"><span>Prefijo</span><input v-model="bulkDraft.prefix" maxlength="150" placeholder="Ej. VACA-" /></label>
-          <div class="range-row">
-            <label class="field"><span>Desde</span><input v-model.number="bulkDraft.from" min="0" type="number" /></label>
-            <label class="field"><span>Hasta</span><input v-model.number="bulkDraft.to" min="0" type="number" /></label>
-            <label class="field"><span>Relleno</span><input v-model.number="bulkDraft.pad" min="1" max="10" type="number" /></label>
-          </div>
-          <div class="guid-preview">
-            <Layers :size="19" />
-            <p v-if="bulkPreview.valid">
-              <strong>{{ bulkPreview.count }} fichas</strong>
-              <span>Desde {{ bulkPreview.first }} hasta {{ bulkPreview.last }}. Se genera un código corto y un QR por ficha.</span>
-            </p>
-            <p v-else><strong>Revisa el rango</strong><span>El prefijo es obligatorio y el final debe ser mayor o igual que el inicio.</span></p>
-          </div>
-          <div class="dialog-actions"><v-btn variant="text" @click="bulkDialog = false">Cancelar</v-btn><v-btn color="primary" :disabled="!bulkPreview.valid" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Crear fichas</v-btn></div>
-        </form>
-      </v-card>
-    </v-dialog>
+    <BulkEntityDialog v-model="bulkDialog" :categories="categories" :clients="clients" :draft="bulkDraft" :is-saving="isSaving" :preview="bulkPreview" @submit="submitBulk" />
 
     <QrPreviewDialog
       v-model="qrDialog"

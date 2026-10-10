@@ -146,7 +146,10 @@ Finalmente se extrajo `src/components/EntityDialog.vue`, incluyendo la
 selección de cliente, alta de cliente y vista previa de URL; el padre conserva
 el submit y la lógica de negocio. También se extrajo
 `src/components/ClientDialog.vue`, manteniendo en el padre la persistencia y
-las notificaciones. Queda pendiente el diálogo de lote y el listado/editor.
+las notificaciones. Finalmente se extrajo `src/components/BulkEntityDialog.vue`
+con la vista previa de rangos y diseño responsive; el padre conserva la
+creación y sus resultados. Queda pendiente el listado/editor de datos
+personalizados.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
