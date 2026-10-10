@@ -82,6 +82,12 @@ contra `gadgetdesign-dev-jricardo`; las E2E remotas seleccionadas pasaron 3/3.
 **Aceptacion:** `npm run verify` termina sin errores y puede ejecutarse desde
 una instalacion limpia.
 
+Se añadió `npm run check:syntax` y `npm run verify` como validacion disponible
+sin dependencias nuevas. La instalacion de ESLint quedo bloqueada por la
+descarga de paquetes en este entorno y sigue pendiente para cerrar el bloque.
+El 2026-10-10 `npm run verify` paso completo: sintaxis en 34 archivos,
+Functions, smoke post-deploy y build.
+
 ## Bloque 3: seguridad y errores
 
 - [ ] Revisar todos los endpoints para confirmar autenticacion y autorizacion
@@ -143,7 +149,9 @@ esta verde y toda migracion tiene instrucciones de rollback o recuperacion.
 
 | Fecha | Bloque | Resultado | Evidencia / comando | Commit | Responsable |
 | --- | --- | --- | --- | --- | --- |
-|  | 0 |  |  |  |  |
+| 2026-10-10 | 0 | Completado | `npm run test:functions`, `npm run test:deploy-smoke`, `npm run build`, `git diff --check` | `90a81be` | Codex |
+| 2026-10-10 | 1 | Completado | Rotacion de contraseña, rechazo de cookie anterior, migracion local/dev y E2E remotas 3/3 | `5fdfed3` | Codex |
+| 2026-10-10 | 2 | Parcial | `npm run check:syntax` y `npm run verify` pasan; ESLint pendiente por descarga bloqueada | Pendiente | Codex |
 |  | 1 |  |  |  |  |
 |  | 2 |  |  |  |  |
 |  | 3 |  |  |  |  |

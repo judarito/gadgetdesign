@@ -14,6 +14,8 @@
     "test:functions": "npm run setup:local && node scripts/testFunctions.mjs",
     "test:deploy-smoke": "node scripts/testDeploySmoke.mjs",
     "test:e2e": "playwright test",
+    "check:syntax": "node scripts/checkSyntax.mjs",
+    "verify": "npm run check:syntax && npm run test:functions && npm run test:deploy-smoke && npm run build",
     "setup:admin": "node scripts/setupAdmin.mjs",
     "setup:drop-legacy": "node scripts/dropLegacyOwnerColumns.mjs"
   },
