@@ -108,9 +108,12 @@ las rutas protegidas rechazan acceso sin sesión y los datos sensibles no salen
 por ninguna respuesta pública.
 
 Avance 2026-10-10: `readJson` limita los cuerpos JSON a 256 KiB y devuelve
-`413` antes de ejecutar lógica o escribir en Turso. La regresión quedó cubierta
-en `testFunctions.mjs`; la suite pasó con los puertos locales alternativos.
-El bloque sigue abierto para completar la revisión endpoint por endpoint.
+`413` antes de ejecutar lógica o escribir en Turso. `handleError` quedó cubierto
+contra filtración de mensajes internos en respuestas `5xx`. También se
+verificaron `no-store`, datos protegidos ausentes en la respuesta pública,
+anti-enumeración y autorización de las rutas mediante `testFunctions.mjs`.
+La suite pasó con los puertos locales alternativos. El bloque sigue abierto
+para revisar manualmente los endpoints restantes y documentar el inventario.
 
 ## Bloque 4: modularizacion gradual del frontend
 
@@ -161,7 +164,7 @@ esta verde y toda migracion tiene instrucciones de rollback o recuperacion.
 | 2026-10-10 | 0 | Completado | `npm run test:functions`, `npm run test:deploy-smoke`, `npm run build`, `git diff --check` | `90a81be` | Codex |
 | 2026-10-10 | 1 | Completado | Rotacion de contraseña, rechazo de cookie anterior, migracion local/dev y E2E remotas 3/3 | `5fdfed3` | Codex |
 | 2026-10-10 | 2 | Completado | `VITE_PORT=5174 NETLIFY_FUNCTIONS_PORT=10001 npm run verify` | Pendiente | Codex |
-| 2026-10-10 | 3 | En progreso | Límite de JSON de 256 KiB y regresión `413`; auditoría restante pendiente | Pendiente | Codex |
+| 2026-10-10 | 3 | En progreso | `413`, errores `5xx` genéricos, `no-store`, datos protegidos y autorización verificados; inventario manual pendiente | Pendiente | Codex |
 |  | 1 |  |  |  |  |
 |  | 2 |  |  |  |  |
 |  | 3 |  |  |  |  |

@@ -3,7 +3,7 @@ import { createClient } from '@libsql/client'
 import { loadEnv } from 'vite'
 import { applyDataIntegrityConstraints } from './schemaConstraints.mjs'
 import { publicEntityCacheHeaders } from '../netlify/functions/_lib/cache.mjs'
-import { clearCookie, sessionCookie } from '../netlify/functions/_lib/http.mjs'
+import { clearCookie, handleError, sessionCookie } from '../netlify/functions/_lib/http.mjs'
 
 const env = loadEnv('', process.cwd(), '')
 const localTursoUrl = env.LOCAL_TURSO_URL || 'file:/tmp/gadgetdesign-local.db'
@@ -31,6 +31,14 @@ delete process.env.OTP_DEV_HINT
 // despliegue se cancela. Las pruebas no mandan correos: se quedan en consola.
 process.env.OTP_DELIVERY_MODE = 'console'
 delete process.env.RESEND_API_KEY
+
+const internalErrorResponse = handleError(new Error('SQL secret token should never leave the server'))
+const internalErrorBody = await internalErrorResponse.json()
+assert(internalErrorResponse.status === 500, 'Un error inesperado debe responder 500.')
+assert(internalErrorBody.error === 'Ocurrió un error interno. Inténtalo nuevamente.',
+  'Los errores 5xx deben usar un mensaje genérico.')
+assert(!JSON.stringify(internalErrorBody).includes('SQL secret token'),
+  'La respuesta 5xx no debe exponer detalles internos.')
 
 process.env.NETLIFY_PURGE_API_TOKEN ??= 'token-de-prueba'
 process.env.NETLIFY_LOCAL ??= 'true'
