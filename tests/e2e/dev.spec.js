@@ -15,6 +15,29 @@ async function abrirComoPublico(page, url) {
   return { publica, anonimo }
 }
 
+async function iniciarSesionAdmin(page) {
+  for (let intento = 0; intento < 3; intento += 1) {
+    try {
+      await page.goto('/admin', { waitUntil: 'domcontentloaded' })
+      const panel = page.getByText('Entidades y URLs', { exact: true })
+      const password = page.getByLabel('Contraseña')
+      await expect(panel.or(password)).toBeVisible()
+      if (await panel.isVisible().catch(() => false)) return
+      await password.waitFor({ state: 'visible' })
+      await password.fill(adminPassword)
+      const loginButton = page.getByRole('button', { name: 'Entrar al administrador' })
+      await loginButton.waitFor({ state: 'visible' })
+      await loginButton.click()
+      await expect(panel).toBeVisible()
+      return
+    } catch (error) {
+      const message = String(error?.message || error)
+      if (!message.includes('detached from the DOM') || intento === 2) throw error
+      await page.waitForTimeout(250)
+    }
+  }
+}
+
 const expectedHost = 'gadgetdesign-dev.netlify.app'
 const targetURL = process.env.E2E_BASE_URL || `https://${expectedHost}`
 const adminPassword = process.env.DEV_ADMIN_PASSWORD || ''
@@ -50,10 +73,7 @@ test('admin permite dos fichas con el mismo nombre visible y ambas rutas públic
   const displayName = `E2E-Max-${runId}`
   const api = page.context().request
 
-  await page.goto('/admin')
-  await page.getByLabel('Contraseña').fill(adminPassword)
-  await page.getByRole('button', { name: 'Entrar al administrador' }).click()
-  await expect(page.getByRole('heading', { name: 'Entidades y URLs' })).toBeVisible()
+  await iniciarSesionAdmin(page)
 
   try {
     for (let i = 0; i < 2; i += 1) {
@@ -114,10 +134,7 @@ test('el panel oculta una ficha, el público deja de verla y puede volver a publ
   const displayName = `E2E-Estado-${runId}`
   const api = page.context().request
 
-  await page.goto('/admin')
-  await page.getByLabel('Contraseña').fill(adminPassword)
-  await page.getByRole('button', { name: 'Entrar al administrador' }).click()
-  await expect(page.getByRole('heading', { name: 'Entidades y URLs' })).toBeVisible()
+  await iniciarSesionAdmin(page)
 
   try {
     // Una ficha propia, para no tocar las del entorno.
@@ -407,10 +424,7 @@ test('una ficha pendiente no se publica hasta que el administrador la aprueba', 
     await anonimo.close()
 
     // El panel la distingue de una desactivada y la encuentra en su filtro.
-    await page.goto('/admin')
-    await page.getByLabel('Contraseña').fill(adminPassword)
-    await page.getByRole('button', { name: 'Entrar al administrador' }).click()
-    await expect(page.getByRole('heading', { name: 'Entidades y URLs' })).toBeVisible()
+    await iniciarSesionAdmin(page)
 
     const filtros = page.locator('.entity-filters')
     await filtros.getByLabel('Estado').selectOption('pendiente')

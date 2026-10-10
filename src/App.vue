@@ -547,12 +547,15 @@ function getCategoryCopy(currentCategory) {
             </span>
           </a>
 
-          <v-btn class="qr-button" icon variant="flat" aria-label="Escanear código QR">
-            <svg class="qr-glyph" viewBox="0 0 32 32" aria-hidden="true">
-              <path d="M6 12V6h6M20 6h6v6M26 20v6h-6M12 26H6v-6" />
-              <path d="M10 10h2M20 10h2M10 20h2M20 20h2M15 15h2M14 22h2M22 15h2M17 9h2M9 15h2" />
-            </svg>
-          </v-btn>
+          <nav class="public-actions" aria-label="Acciones de la página">
+            <a class="portal-link" href="/portal">Acceso del propietario</a>
+            <v-btn class="qr-button" icon variant="flat" aria-label="Escanear código QR">
+              <svg class="qr-glyph" viewBox="0 0 32 32" aria-hidden="true">
+                <path d="M6 12V6h6M20 6h6v6M26 20v6h-6M12 26H6v-6" />
+                <path d="M10 10h2M20 10h2M10 20h2M20 20h2M15 15h2M14 22h2M22 15h2M17 9h2M9 15h2" />
+              </svg>
+            </v-btn>
+          </nav>
         </div>
       </header>
 
@@ -1311,6 +1314,26 @@ function getCategoryCopy(currentCategory) {
   color: #0873ff;
   background: #eef7ff;
   border-radius: 12px;
+}
+
+.public-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.portal-link {
+  color: #345da8;
+  font-size: .9rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.portal-link:hover,
+.portal-link:focus-visible {
+  color: #0873ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .qr-glyph {
@@ -2456,6 +2479,15 @@ function getCategoryCopy(currentCategory) {
 }
 
 @media (max-width: 560px) {
+  .public-actions { gap: 8px; }
+
+  .portal-link {
+    max-width: 112px;
+    font-size: .78rem;
+    line-height: 1.15;
+    text-align: right;
+  }
+
   .brand-word {
     font-size: 1.22rem;
   }

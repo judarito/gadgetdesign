@@ -178,7 +178,7 @@ migrar la tabla en local, pruebas y Turso antes de marcarlo completo.
   npm run build
   ```
 
-- [ ] Ejecutar los E2E contra el sitio de pruebas:
+- [x] Ejecutar los E2E contra el sitio de pruebas:
 
   ```sh
   E2E_BASE_URL=https://gadgetdesign-dev.netlify.app \
@@ -199,9 +199,9 @@ migrar la tabla en local, pruebas y Turso antes de marcarlo completo.
 **Aceptacion:** todas las pruebas pasan, no hay secretos en el diff y el PR
 contiene solo cambios revisados.
 
-El bloque queda abierto hasta desplegar estos cambios en `gadgetdesign-dev` y
-repetir allí los E2E remotos. La validación local, smoke test, build y revisión
-de secretos ya pasaron el 2026-10-09.
+El bloque queda abierto por la revisión manual pendiente y por crear el PR.
+Los E2E remotos pasaron 6/6 el 2026-10-10 contra
+`https://gadgetdesign-dev.netlify.app`.
 
 ## Bloque 7: produccion
 
@@ -259,3 +259,7 @@ con el siguiente bloque.
 - 2026-10-09: Bloque 6 parcial. Pasaron `git diff --check`,
   `npm run test:deploy-smoke`, `npm run build` y el E2E local. El E2E remoto no
   pudo encontrar `Nueva ficha` porque el sitio dev todavía usa el deploy previo.
+- 2026-10-10: Se hizo explícita la rotación de la credencial de pruebas con
+  `RESET_ADMIN_PASSWORD=true` y `DEV_ADMIN_PASSWORD`; se sincronizó Turso dev.
+  La suite E2E remota pasó 6/6. Se estabilizó el login de Playwright esperando
+  el panel o el formulario después de cada navegación.
