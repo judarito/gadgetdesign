@@ -30,6 +30,7 @@ import {
   CUSTOM_DATA_VALUE_MAX_LENGTH,
 } from './services/validation'
 import { CUSTOM_DATA_TYPES, formatCustomDataValue, getDataType } from './services/dataTypes'
+import CustomDataSuggestions from './components/CustomDataSuggestions.vue'
 
 const routeContext = getRouteContext()
 const category = ref(null)
@@ -714,7 +715,27 @@ function getCategoryCopy(currentCategory) {
               <span>Dato y Valor son obligatorios.</span>
             </div>
 
-            <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
+            <CustomDataSuggestions
+              :authorized="auth.authorized"
+              :can-request-code="auth.canRequestCode"
+              :can-use-crud="canUseCrud"
+              :category-name="category?.name"
+              :custom-data-key-max-length="CUSTOM_DATA_KEY_MAX_LENGTH"
+              :custom-data-value-max-length="CUSTOM_DATA_VALUE_MAX_LENGTH"
+              :drafts="suggestionDrafts"
+              :get-data-type="getDataType"
+              :is-loading="isLoading"
+              :is-saving="isSaving"
+              :saving-key="savingKey"
+              :selected="selectedSuggestion"
+              :visible="showSuggestions"
+              @close="closeSuggestionEditor"
+              @open-date-picker="openDatePicker"
+              @open-date-picker-trigger="openDatePickerFromTrigger"
+              @save="saveNewDraft"
+              @select="selectSuggestion"
+            />
+            <section v-if="false && showSuggestions && !isLoading" class="suggestions-panel">
               <div class="suggestions-heading">
                 <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
                 <p>Selecciona una para agregarla.</p>

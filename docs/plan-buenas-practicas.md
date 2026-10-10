@@ -149,7 +149,11 @@ el submit y la lógica de negocio. También se extrajo
 las notificaciones. Finalmente se extrajo `src/components/BulkEntityDialog.vue`
 con la vista previa de rangos y diseño responsive; el padre conserva la
 creación y sus resultados. Queda pendiente el listado/editor de datos
-personalizados.
+personalizados. Como primer paso se extrajo
+`src/components/CustomDataSuggestions.vue` con sus opciones, editor inline,
+protección y eventos del datepicker. El template anterior quedó desactivado
+temporalmente para retirar el duplicado después de verificar visualmente el
+nuevo componente junto con el listado.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
