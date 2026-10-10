@@ -68,8 +68,10 @@ export function deleteClient(id) {
   return apiRequest('admin', { action: 'delete-client', method: 'DELETE', body: { id } })
 }
 
-export function listEntities({ categoryId = null, clienteId = null, search = '', page = 1, pageSize = 10 } = {}) {
-  return apiRequest('admin', { action: 'entities', query: { categoryId, clienteId, search, page, pageSize } })
+export function listEntities({
+  categoryId = null, clienteId = null, status = '', search = '', page = 1, pageSize = 10,
+} = {}) {
+  return apiRequest('admin', { action: 'entities', query: { categoryId, clienteId, status, search, page, pageSize } })
 }
 
 export function createEntity(entity) {
@@ -82,6 +84,10 @@ export function bulkCreateEntities(range) {
 
 export function updateEntity(entity) {
   return apiRequest('admin', { action: 'update-entity', method: 'PATCH', body: entity })
+}
+
+export function setEntityStatus(id, status) {
+  return apiRequest('admin', { action: 'set-entity-status', method: 'POST', body: { id, status } })
 }
 
 export function regenerateEntityToken(id) {

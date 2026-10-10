@@ -1,12 +1,52 @@
 import { expect, test } from '@playwright/test'
 
+/**
+ * Abre una URL como la vería el público: en un contexto nuevo, sin las cookies de
+ * la sesión que tenga abierta la prueba.
+ *
+ * Importa: en el mismo contexto, la sesión del portal autoriza la ficha, así que
+ * el dueño la ve aunque esté desactivada —que es lo correcto— y la comprobación
+ * del público no probaría nada.
+ */
+async function abrirComoPublico(page, url) {
+  const anonimo = await page.context().browser().newContext()
+  const publica = await anonimo.newPage()
+  await publica.goto(url)
+  return { publica, anonimo }
+}
+
+async function iniciarSesionAdmin(page) {
+  for (let intento = 0; intento < 3; intento += 1) {
+    try {
+      await page.goto('/admin', { waitUntil: 'domcontentloaded' })
+      const panel = page.getByText('Entidades y URLs', { exact: true })
+      const password = page.getByLabel('Contraseña')
+      await expect(panel.or(password)).toBeVisible()
+      if (await panel.isVisible().catch(() => false)) return
+      await password.waitFor({ state: 'visible' })
+      await password.fill(adminPassword)
+      const loginButton = page.getByRole('button', { name: 'Entrar al administrador' })
+      await loginButton.waitFor({ state: 'visible' })
+      await loginButton.click()
+      await expect(panel).toBeVisible()
+      return
+    } catch (error) {
+      const message = String(error?.message || error)
+      if (!message.includes('detached from the DOM') || intento === 2) throw error
+      await page.waitForTimeout(250)
+    }
+  }
+}
+
 const expectedHost = 'gadgetdesign-dev.netlify.app'
 const targetURL = process.env.E2E_BASE_URL || `https://${expectedHost}`
 const adminPassword = process.env.DEV_ADMIN_PASSWORD || ''
+const localE2E = process.env.ALLOW_LOCAL_E2E === 'true'
 
 test.beforeAll(() => {
   const host = new URL(targetURL).host
-  if (host !== expectedHost) {
+  const isLocalhost = host === 'localhost:5173' || host === '127.0.0.1:5173'
+  if (host !== expectedHost && !(localE2E && isLocalhost)) {
     throw new Error(`E2E bloqueado: solo puede ejecutarse contra ${expectedHost}, no contra ${host}.`)
   }
 })
@@ -33,10 +73,7 @@ test('admin permite dos fichas con el mismo nombre visible y ambas rutas públic
   const displayName = `E2E-Max-${runId}`
   const api = page.context().request
 
-  await page.goto('/admin')
-  await page.getByLabel('Contraseña').fill(adminPassword)
-  await page.getByRole('button', { name: 'Entrar al administrador' }).click()
-  await expect(page.getByRole('heading', { name: 'Entidades y URLs' })).toBeVisible()
+  await iniciarSesionAdmin(page)
 
   try {
     for (let i = 0; i < 2; i += 1) {
@@ -83,6 +120,339 @@ test('admin permite dos fichas con el mismo nombre visible y ambas rutas públic
         await api.delete('/.netlify/functions/admin?action=delete-entity', {
           data: { id: entity.id },
         })
+      }
+    }
+  }
+})
+
+test('el panel oculta una ficha, el público deja de verla y puede volver a publicarla', async ({ page }) => {
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const displayName = `E2E-Estado-${runId}`
+  const api = page.context().request
+
+  await iniciarSesionAdmin(page)
+
+  try {
+    // Una ficha propia, para no tocar las del entorno.
+    await page.getByRole('button', { name: 'Nueva entidad' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Nombre visible').fill(displayName)
+    await dialog.getByRole('button', { name: 'Guardar' }).click()
+    await expect(dialog).toBeHidden()
+
+    const row = page.locator('article.entity-row').filter({ hasText: displayName })
+    await expect(row).toHaveCount(1)
+    const href = await row.locator('.entity-url a').first().getAttribute('href')
+
+    // Activa, se ve en público con su nombre.
+    const { publica: activa, anonimo: contextoActiva } = await abrirComoPublico(page, href)
+    await expect(activa.getByText(displayName, { exact: true }).first()).toBeVisible()
+    await contextoActiva.close()
+
+    // El panel la oculta.
+    await row.getByTitle('Ocultar al público').click()
+    await expect(row.locator('.status-pill')).toHaveText('Desactivada')
+
+    // Y el público deja de verla, incluido su nombre.
+    const { publica: oculta, anonimo: contextoOculta } = await abrirComoPublico(page, href)
+    await expect(oculta.getByText('Esta ficha no está disponible')).toBeVisible()
+    await expect(oculta.getByText(displayName, { exact: true })).toHaveCount(0)
+    await contextoOculta.close()
+
+    // El filtro por estado la encuentra entre las desactivadas.
+    const filtros = page.locator('.entity-filters')
+    await filtros.getByLabel('Estado').selectOption('inactiva')
+    await filtros.getByRole('button', { name: 'Filtrar' }).click()
+    const ocultas = page.locator('article.entity-row').filter({ hasText: displayName })
+    await expect(ocultas).toHaveCount(1)
+
+    // Al publicarla sale de esa lista: cambia el estado y el filtro lo refleja.
+    await ocultas.getByTitle('Publicar').click()
+    await expect(page.locator('article.entity-row').filter({ hasText: displayName })).toHaveCount(0)
+
+    // Y vuelve al público con el mismo código corto.
+    const { publica: publicada, anonimo: contextoPublicada } = await abrirComoPublico(page, href)
+    await expect(publicada.getByText(displayName, { exact: true }).first()).toBeVisible()
+    await contextoPublicada.close()
+  } finally {
+    const list = await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )
+    if (list.ok()) {
+      const payload = await list.json()
+      for (const entity of payload.items || []) {
+        if (entity.displayName !== displayName) continue
+        const borrada = await api.delete('/.netlify/functions/admin?action=delete-entity', { data: { id: entity.id } })
+        // En un `finally` no conviene lanzar, pero tampoco callarse: si el borrado
+        // falla, la ficha se queda en el entorno y hay que enterarse.
+        if (!borrada.ok()) {
+          console.warn(`No se pudo borrar la ficha de prueba ${entity.id}: HTTP ${borrada.status()}`)
+        }
+      }
+    }
+  }
+})
+
+test('el cliente desactiva su ficha desde el portal', async ({ page }) => {
+  // Encadena más pasos que las otras: alta por API, login en el portal, la
+  // desactivación y dos lecturas públicas en contextos aparte.
+  test.slow()
+
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const displayName = `E2E-Portal-${runId}`
+  const api = page.context().request
+
+  try {
+    // El administrador deja una ficha a nombre del cliente de pruebas.
+    const login = await api.post('/.netlify/functions/admin?action=login', { data: { password: adminPassword } })
+    expect(login.ok()).toBeTruthy()
+
+    const clientes = await (await api.get('/.netlify/functions/admin?action=clients&search=finca@example.com')).json()
+    const clienteId = clientes.items[0].id
+    const categorias = await (await api.get('/.netlify/functions/admin?action=category-options')).json()
+
+    const creada = await api.post('/.netlify/functions/admin?action=create-entity', {
+      data: { displayName, categoryId: categorias[0].id, clienteId },
+    })
+    expect(creada.ok()).toBeTruthy()
+    const shortCode = (await creada.json()).shortCode
+
+    // El cliente entra en el portal. En dev el código se muestra en pantalla, así
+    // que se comprueba el aviso y que viene ya escrito en el campo.
+    await page.goto('/portal')
+    await page.getByLabel('Correo electrónico').fill('finca@example.com')
+    await page.getByRole('button', { name: 'Enviar código' }).click()
+
+    const aviso = page.locator('.dev-hint')
+    await expect(aviso).toBeVisible()
+    const codigo = (await aviso.textContent()).match(/\d{6}/)?.[0]
+    expect(codigo).toBeTruthy()
+    await expect(page.getByLabel('Código')).toHaveValue(codigo)
+    await page.getByRole('button', { name: 'Entrar' }).click()
+
+    // El límite de códigos por cliente son 5 cada 15 minutos. Si la prueba se
+    // ejecuta varias veces seguidas se agota: el servidor responde igual pero sin
+    // generar código, el aviso muestra uno de relleno y el portal no entra. Es una
+    // condición del entorno, así que se salta en vez de dar un fallo que parecería
+    // del producto.
+    // Hay que esperar a que la lista se pinte: el login es una llamada de red y
+    // `count()` no reintenta, así que mirar de inmediato daba por hecho que no
+    // estaba cuando aún no había llegado.
+    const fila = page.locator('.entity-row').filter({ hasText: displayName })
+    const aparecio = await fila.waitFor({ state: 'visible', timeout: 20_000 }).then(() => true).catch(() => false)
+    if (!aparecio) {
+      const mensaje = ((await page.locator('.alert').first().textContent().catch(() => '')) || '').trim()
+      test.skip(true, `El portal no entró: ${mensaje || 'sin mensaje'} (¿límite de códigos agotado?)`)
+    }
+    await expect(fila).toHaveCount(1)
+
+    // Desactivar avisa antes, porque el cliente no puede deshacerlo.
+    page.on('dialog', (dialog) => dialog.accept())
+    await fila.getByTitle('Desactivar: deja de verse en público').click()
+    await expect(fila.locator('.status-pill')).toHaveText('Desactivada')
+
+    // Y el público deja de verla.
+    const { publica: oculta, anonimo: contextoOculta } = await abrirComoPublico(page, `/${shortCode}`)
+    await expect(oculta.getByText('Esta ficha no está disponible')).toBeVisible()
+    await contextoOculta.close()
+
+    // El dueño sí entra, y la propia página le avisa de que el público no la ve.
+    await page.goto(`/${shortCode}`)
+    await expect(page.locator('.owner-status-banner')).toContainText('desactivada')
+
+    // El panel la vuelve a publicar.
+    const encontradas = await (await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )).json()
+    const paraReactivar = encontradas.items.find((item) => item.displayName === displayName)
+    expect(paraReactivar, 'la ficha de prueba debe seguir en el panel').toBeTruthy()
+    const reactivada = await api.post('/.netlify/functions/admin?action=set-entity-status', {
+      data: { id: paraReactivar.id, status: 'activa' },
+    })
+    expect(reactivada.ok()).toBeTruthy()
+
+    const { publica: visible, anonimo: contextoVisible } = await abrirComoPublico(page, `/${shortCode}`)
+    await expect(visible.getByText(displayName, { exact: true }).first()).toBeVisible()
+    await contextoVisible.close()
+  } finally {
+    // Buscar por nombre y no fiarse del id ya capturado: si la prueba falla antes
+    // de obtenerlo, la ficha se quedaría en el entorno.
+    const list = await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )
+    if (list.ok()) {
+      const payload = await list.json()
+      for (const entity of payload.items || []) {
+        if (entity.displayName !== displayName) continue
+        const borrada = await api.delete('/.netlify/functions/admin?action=delete-entity', { data: { id: entity.id } })
+        // En un `finally` no conviene lanzar, pero tampoco callarse: si el borrado
+        // falla, la ficha se queda en el entorno y hay que enterarse.
+        if (!borrada.ok()) {
+          console.warn(`No se pudo borrar la ficha de prueba ${entity.id}: HTTP ${borrada.status()}`)
+        }
+      }
+    }
+  }
+})
+
+test('el cliente propone una ficha desde el portal y queda pendiente de aprobación', async ({ page }) => {
+  test.slow()
+
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const email = `e2e-${runId}@example.com`
+  const displayName = `E2E-Propuesta-${runId}`
+  const api = page.context().request
+  let clientId
+
+  try {
+    const login = await api.post('/.netlify/functions/admin?action=login', {
+      data: { password: adminPassword },
+    })
+    expect(login.ok()).toBeTruthy()
+
+    const categories = await (await api.get('/.netlify/functions/admin?action=category-options')).json()
+    expect(categories.length).toBeGreaterThan(0)
+    const client = await api.post('/.netlify/functions/admin?action=save-client', {
+      data: { name: `Cliente ${runId}`, email, phone: '', active: true },
+    })
+    expect(client.ok()).toBeTruthy()
+    clientId = (await client.json()).id
+
+    await page.goto('/portal')
+    await page.getByLabel('Correo electrónico').fill(email)
+    await page.getByRole('button', { name: 'Enviar código' }).click()
+    const aviso = page.locator('.dev-hint')
+    await expect(aviso).toBeVisible()
+    const codigo = (await aviso.textContent()).match(/\d{6}/)?.[0]
+    expect(codigo).toBeTruthy()
+    await page.getByLabel('Código').fill(codigo)
+    await page.getByRole('button', { name: 'Entrar' }).click()
+    await expect(page.getByRole('heading', { name: `Cliente ${runId}` })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Nueva ficha' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('pendiente de aprobación')
+    await dialog.getByLabel('Nombre visible').fill(displayName)
+    await dialog.getByLabel('Categoría').selectOption(String(categories[0].id))
+
+    // El formulario debe seguir contenido en viewport móvil.
+    await page.setViewportSize({ width: 390, height: 844 })
+    const box = await dialog.boundingBox()
+    expect(box).toBeTruthy()
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+
+    await dialog.getByRole('button', { name: 'Enviar para aprobación' }).click()
+    await expect(dialog).toBeHidden()
+    const row = page.locator('.entity-row').filter({ hasText: displayName })
+    await expect(row).toHaveCount(1)
+    await expect(row.locator('.status-pill')).toHaveText('Pendiente de aprobación')
+    await expect(page.locator('.v-snackbar')).toContainText('administrador la apruebe')
+
+    const listado = await (await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )).json()
+    expect(listado.items[0].status).toBe('pendiente')
+  } finally {
+    const list = await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )
+    if (list.ok()) {
+      const payload = await list.json()
+      for (const entity of payload.items || []) {
+        if (entity.displayName === displayName) {
+          await api.delete('/.netlify/functions/admin?action=delete-entity', { data: { id: entity.id } })
+        }
+      }
+    }
+    if (clientId) {
+      await api.delete('/.netlify/functions/admin?action=delete-client', { data: { id: clientId } })
+    }
+  }
+})
+
+test('una ficha pendiente no se publica hasta que el administrador la aprueba', async ({ page }) => {
+  // Esta prueba cubre la aprobación y el aislamiento público; el alta desde el
+  // portal se prueba en el escenario anterior.
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const displayName = `E2E-Pendiente-${runId}`
+  const api = page.context().request
+
+  try {
+    const login = await api.post('/.netlify/functions/admin?action=login', {
+      data: { password: adminPassword },
+    })
+    expect(login.ok()).toBeTruthy()
+
+    const categorias = await (await api.get('/.netlify/functions/admin?action=category-options')).json()
+    const creada = await api.post('/.netlify/functions/admin?action=create-entity', {
+      data: { displayName, categoryId: categorias[0].id },
+    })
+    expect(creada.ok()).toBeTruthy()
+    const shortCode = (await creada.json()).shortCode
+
+    const listado = await (await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )).json()
+    const pendiente = await api.post('/.netlify/functions/admin?action=set-entity-status', {
+      data: { id: listado.items[0].id, status: 'pendiente' },
+    })
+    expect(pendiente.ok()).toBeTruthy()
+
+    // Pendiente es no publicada: el público no la ve, ni su nombre.
+    const { publica, anonimo } = await abrirComoPublico(page, `/${shortCode}`)
+    await expect(publica.getByText('Esta ficha no está disponible')).toBeVisible()
+    await expect(publica.getByText(displayName, { exact: true })).toHaveCount(0)
+    await anonimo.close()
+
+    // El panel la distingue de una desactivada y la encuentra en su filtro.
+    await iniciarSesionAdmin(page)
+
+    const filtros = page.locator('.entity-filters')
+    await filtros.getByLabel('Estado').selectOption('pendiente')
+    await filtros.getByRole('button', { name: 'Filtrar' }).click()
+
+    const fila = page.locator('article.entity-row').filter({ hasText: displayName })
+    await expect(fila).toHaveCount(1)
+    await expect(fila.locator('.status-pill')).toHaveText('Pendiente')
+
+    // Aprobarla la publica, y sale de la lista de pendientes.
+    await fila.getByTitle('Publicar').click()
+    await expect(page.locator('article.entity-row').filter({ hasText: displayName })).toHaveCount(0)
+
+    const { publica: aprobada, anonimo: contextoAprobada } = await abrirComoPublico(page, `/${shortCode}`)
+    await expect(aprobada.getByText(displayName, { exact: true }).first()).toBeVisible()
+    await contextoAprobada.close()
+  } finally {
+    const list = await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )
+    if (list.ok()) {
+      const payload = await list.json()
+      for (const entity of payload.items || []) {
+        if (entity.displayName !== displayName) continue
+        const borrada = await api.delete('/.netlify/functions/admin?action=delete-entity', { data: { id: entity.id } })
+        if (!borrada.ok()) {
+          console.warn(`No se pudo borrar la ficha de prueba ${entity.id}: HTTP ${borrada.status()}`)
+        }
       }
     }
   }

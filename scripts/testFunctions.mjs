@@ -393,6 +393,34 @@ try {
     'El portal debe emitir su propia cookie de sesión.')
   assert(portalLogin.data.cliente.email === 'finca@example.com', 'El portal debe saludar al cliente.')
   assert(portalLogin.data.total === 7, 'El portal debe listar todas las fichas del cliente.')
+  assert(portalLogin.data.categories.some((category) => category.id === motoCategoryId),
+    'El portal debe recibir las categorías activas para proponer fichas.')
+
+  await expectStatus(() => request('client', 'create-entity', {
+    method: 'POST', body: { displayName: 'SIN-SESION', categoryId: motoCategoryId },
+  }), 401, 'Crear una ficha debe exigir sesión de cliente.')
+
+  const proposed = await request('client', 'create-entity', {
+    method: 'POST', cookie: clientCookie,
+    body: { displayName: 'PROPUESTA-PORTAL', categoryId: motoCategoryId },
+  })
+  assert(proposed.status === 'pendiente' && proposed.shortCode,
+    'Una ficha creada desde el portal debe nacer pendiente y recibir código corto.')
+  const proposedPublic = await request('entity', 'context', {
+    query: { token: proposed.shortCode },
+  })
+  assert(proposedPublic.unavailable === true && proposedPublic.entity === null,
+    'Una ficha propuesta no debe publicarse antes de la aprobación.')
+  const approved = await request('admin', 'set-entity-status', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: proposed.id, status: 'activa' },
+  })
+  assert(approved.status === 'activa', 'El administrador debe poder aprobar la propuesta.')
+  const approvedPublic = await request('entity', 'context', {
+    query: { token: proposed.shortCode },
+  })
+  assert(approvedPublic.entity?.displayName === 'PROPUESTA-PORTAL',
+    'Una ficha aprobada debe volver a ser pública con el mismo código.')
 
   const noPending = await statusOf(() => request('client', 'verify-code', {
     method: 'POST', body: { email: 'finca@example.com', code: '000002' },
@@ -413,7 +441,7 @@ try {
   const portalContext = await request('client', 'context', {
     cookie: clientCookie, includeResponse: true,
   })
-  assert(portalContext.data.total === 7, 'El listado del portal debe mantenerse con la sesión.')
+  assert(portalContext.data.total === 8, 'El listado del portal debe incluir la ficha propuesta.')
   assert(portalContext.response.headers.get('netlify-cdn-cache-control') === 'no-store',
     'El listado del portal nunca debe cachearse en el CDN.')
 
@@ -488,6 +516,28 @@ try {
     'Un cliente desactivado debe dejar sus fichas en solo lectura.')
   assert(deactivated.auth.emailHint === '',
     'Un cliente desactivado no debe publicar ni la pista de su correo.')
+  const hiddenByClient = await request('entity', 'context', { query: { token: moto1.shortCode } })
+  assert(hiddenByClient.unavailable === true && hiddenByClient.entity === null,
+    'Las fichas de un cliente inactivo no deben ser públicas.')
+
+  await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: newClient.id, name: 'Finca El Paraíso', email: 'nueva@example.com', active: true },
+  })
+  await request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: motoCategoryId, name: 'Motos', code: 'MOTO', active: false },
+  })
+  const hiddenByCategory = await request('entity', 'context', { query: { token: moto1.shortCode } })
+  assert(hiddenByCategory.unavailable === true && hiddenByCategory.entity === null,
+    'Las fichas de una categoría inactiva no deben ser públicas.')
+  await expectStatus(() => request('entity', 'request-code', {
+    method: 'POST', body: { token: moto1.shortCode },
+  }), 409, 'Una categoría inactiva no debe permitir solicitar códigos.')
+  await request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: motoCategoryId, name: 'Motos', code: 'MOTO', active: true },
+  })
 
   // --- Límites de la creación masiva -------------------------------------
   await expectStatus(() => request('admin', 'bulk-create-entities', {
@@ -538,6 +588,91 @@ try {
     'El portal debe paginar cuando el cliente tiene más de 50 fichas.')
   assert(ownerPage2.items.length === 50, 'La segunda página del portal debe traer las siguientes 50.')
   assert(ownerPage3.items.length === 1, 'La última página del portal debe traer el resto.')
+
+  // --- Estado de la ficha: pendiente, activa, inactiva ---------------------
+  // Una ficha pendiente todavía no se puede crear por la API (eso es la fase 2),
+  // así que se inserta directamente para poder comprobar su comportamiento
+  // público. Se le da otro dueño para comprobar de paso que el cliente solo
+  // puede apagar lo suyo.
+  // Cliente propio: el que usa la primera mitad de la suite ya está cerrado.
+  const statusDb = createClient({ url: localTursoUrl })
+  await statusDb.execute({
+    sql: `INSERT INTO Entidades
+          (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version, clienteID, status)
+          VALUES (500, 'PENDIENTE-PRUEBA', 'pendiente-prueba-token', 1, '[]', 'PendPrb', 1, ?, 'pendiente')`,
+    args: [newClient.id],
+  })
+
+  const stPendiente = await request('entity', 'context', { query: { token: 'PendPrb' } })
+  assert(stPendiente.unavailable === true && stPendiente.entity === null,
+    'Una ficha pendiente no debe servirse en público.')
+  assert(!JSON.stringify(stPendiente).includes('PENDIENTE-PRUEBA'),
+    'Una ficha no activa no debe filtrar ni su nombre visible.')
+
+  const stPendientes = await request('admin', 'entities', {
+    cookie: adminCookie, query: { status: 'pendiente' },
+  })
+  assert(stPendientes.total === 1 && stPendientes.items[0].displayName === 'PENDIENTE-PRUEBA',
+    'El panel debe poder filtrar las fichas por estado.')
+  await expectStatus(() => request('admin', 'entities', {
+    cookie: adminCookie, query: { status: 'inventado' },
+  }), 400, 'El panel debe rechazar un estado que no existe.')
+
+  // Control previo: la sesión del QR sí vale mientras la ficha está activa.
+  await request('entity', 'create-data', {
+    method: 'POST', cookie: entityCookie,
+    body: { ...route, data: { key: 'Antes de apagarla', value: 'sí', dataType: 'text' } },
+  })
+
+  const stOff = await request('client', 'deactivate-entity', {
+    method: 'POST', cookie: ownerCookie, body: { token: 'Local001' },
+  })
+  assert(stOff.status === 'inactiva', 'El cliente debe poder desactivar una ficha suya.')
+
+  const stPublicOff = await request('entity', 'context', { query: route, includeResponse: true })
+  assert(stPublicOff.data.unavailable === true && stPublicOff.data.entity === null,
+    'Una ficha desactivada debe dejar de servirse en público.')
+  assert(stPublicOff.response.headers.get('netlify-cdn-cache-control') === 'no-store',
+    'La respuesta de una ficha no disponible no debe cachearse: al reactivar tiene que verse ya.')
+
+  const stOwnerView = await request('entity', 'context', { cookie: ownerCookie, query: route })
+  assert(stOwnerView.entity?.status === 'inactiva',
+    'El dueño debe seguir viendo su ficha desactivada desde el portal.')
+  const stOwnerPortal = await request('client', 'context', {
+    cookie: ownerCookie, query: { search: 'LOCAL-001' },
+  })
+  assert(stOwnerPortal.items[0]?.status === 'inactiva', 'El portal debe informar el estado de cada ficha.')
+
+  // Desactivada, la sesión del QR deja de valer: el código impreso no entra.
+  await expectStatus(() => request('entity', 'create-data', {
+    method: 'POST', cookie: entityCookie,
+    body: { ...route, data: { key: 'Con la ficha apagada', value: 'no', dataType: 'text' } },
+  }), 401, 'La sesión del QR no debe valer para una ficha desactivada.')
+  await expectStatus(() => request('entity', 'request-code', { method: 'POST', body: route }),
+    409, 'Una ficha desactivada no debe entregar códigos.')
+
+  await expectStatus(() => request('client', 'deactivate-entity', {
+    method: 'POST', cookie: ownerCookie, body: { token: 'PendPrb' },
+  }), 404, 'El cliente no debe poder apagar una ficha que no es suya.')
+
+  // Y el administrador la vuelve a publicar, con el mismo código corto.
+  const stLocalId = stOwnerPortal.items[0].id
+  const stOn = await request('admin', 'set-entity-status', {
+    method: 'POST', cookie: adminCookie, body: { id: stLocalId, status: 'activa' },
+  })
+  assert(stOn.status === 'activa', 'El administrador debe poder reactivar una ficha.')
+  const stPublicOn = await request('entity', 'context', { query: route })
+  assert(stPublicOn.entity?.displayName === 'LOCAL-001' && stPublicOn.entity.status === 'activa',
+    'Reactivar debe devolver la ficha al público con el mismo código corto.')
+
+  await expectDbFailure(() => statusDb.execute("UPDATE Entidades SET status = 'inventado' WHERE id = 1"))
+  await statusDb.execute({ sql: 'DELETE FROM Entidades WHERE id = 500' })
+  statusDb.close()
+
+  console.log('✓ Una ficha no activa no se sirve en público')
+  console.log('✓ El cliente desactiva lo suyo y el administrador reactiva')
+  console.log('✓ Desactivada, la sesión del QR deja de valer y no se entregan códigos')
+  console.log('✓ El panel filtra por estado y la base rechaza uno inventado')
 
   // Reactivar al cliente no debe devolver la validez a las sesiones ni a los
   // códigos que había antes de desactivarlo.

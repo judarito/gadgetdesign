@@ -3,6 +3,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   AlertTriangle,
   CalendarDays,
+  EyeOff,
   LockKeyhole,
   LogOut,
   Mail,
@@ -48,6 +49,8 @@ const deleteEntityDialog = ref(false)
 const pendingDeleteItem = ref(null)
 const deleteEntityConfirmation = ref('')
 const entityDeleted = ref(false)
+// El servidor responde `unavailable` cuando la ficha existe pero no está activa.
+const unavailable = ref(false)
 const isOffline = ref(!navigator.onLine)
 const accessCode = ref('')
 const isLoading = ref(true)
@@ -363,6 +366,7 @@ async function confirmDeleteEntity() {
 
 function applyContext(context) {
   entityDeleted.value = false
+  unavailable.value = Boolean(context.unavailable)
   category.value = context.category
   entity.value = context.entity
   customData.value = context.entity?.customData || []
@@ -543,12 +547,15 @@ function getCategoryCopy(currentCategory) {
             </span>
           </a>
 
-          <v-btn class="qr-button" icon variant="flat" aria-label="Escanear código QR">
-            <svg class="qr-glyph" viewBox="0 0 32 32" aria-hidden="true">
-              <path d="M6 12V6h6M20 6h6v6M26 20v6h-6M12 26H6v-6" />
-              <path d="M10 10h2M20 10h2M10 20h2M20 20h2M15 15h2M14 22h2M22 15h2M17 9h2M9 15h2" />
-            </svg>
-          </v-btn>
+          <nav class="public-actions" aria-label="Acciones de la página">
+            <a class="portal-link" href="/portal">Acceso del propietario</a>
+            <v-btn class="qr-button" icon variant="flat" aria-label="Escanear código QR">
+              <svg class="qr-glyph" viewBox="0 0 32 32" aria-hidden="true">
+                <path d="M6 12V6h6M20 6h6v6M26 20v6h-6M12 26H6v-6" />
+                <path d="M10 10h2M20 10h2M10 20h2M20 20h2M15 15h2M14 22h2M22 15h2M17 9h2M9 15h2" />
+              </svg>
+            </v-btn>
+          </nav>
         </div>
       </header>
 
@@ -605,7 +612,41 @@ function getCategoryCopy(currentCategory) {
               <p>La entidad, sus datos personalizados y sus accesos asociados ya no están almacenados.</p>
             </div>
 
+            <!-- La ficha existe pero no está activa. Se dice, en vez de dejarla
+                 pasar por «no encontrada»: este código va pegado a un objeto
+                 físico y quien lo escanee merece saber qué ocurre. -->
+            <div v-else-if="unavailable" class="unavailable-state" role="status">
+              <EyeOff :size="34" />
+              <h3>Esta ficha no está disponible</h3>
+              <!-- El servidor no dice si está pendiente o desactivada, a propósito:
+                   el público solo necesita saber que ahora mismo no se muestra. Una
+                   ficha pendiente no la desactivó nadie, así que no se afirma eso. -->
+              <p>
+                Ahora mismo sus datos no se muestran. Si crees que debería estar
+                disponible, pídele al administrador que la publique.
+              </p>
+            </div>
+
             <template v-else>
+              <!-- El dueño ve y edita una ficha no activa, pero tiene que saber que el
+                   público no la está viendo: si no, la editaría creyendo que está
+                   publicada. Solo aparece con sesión, que es quien puede verla. -->
+              <div
+                v-if="entity && entity.status !== 'activa' && !isLoading"
+                class="owner-status-banner"
+                role="status"
+              >
+                <EyeOff :size="20" />
+                <span v-if="entity.status === 'pendiente'">
+                  Esta ficha está <strong>pendiente de aprobación</strong>: todavía no se ve en
+                  público. El administrador tiene que aprobarla.
+                </span>
+                <span v-else>
+                  Esta ficha está <strong>desactivada</strong>: el público no la ve. El
+                  administrador tiene que volver a publicarla.
+                </span>
+              </div>
+
               <div v-if="entity && !isLoading" class="access-panel" :class="{ 'access-panel--verified': auth.authorized }">
               <component :is="auth.authorized ? ShieldCheck : LockKeyhole" :size="22" />
               <div>
@@ -1275,6 +1316,26 @@ function getCategoryCopy(currentCategory) {
   border-radius: 12px;
 }
 
+.public-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.portal-link {
+  color: #345da8;
+  font-size: .9rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.portal-link:hover,
+.portal-link:focus-visible {
+  color: #0873ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .qr-glyph {
   display: block;
   width: 30px;
@@ -1562,6 +1623,20 @@ function getCategoryCopy(currentCategory) {
   height: 42px;
   border-radius: 10px;
 }
+
+.owner-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 13px 15px;
+  color: #6b6250;
+  background: #fffcf4;
+  border: 1px solid #e2d3ad;
+  border-radius: 10px;
+}
+
+.owner-status-banner svg { flex: 0 0 auto; color: #a8832f; }
 
 .access-panel {
   display: grid;
@@ -2182,6 +2257,22 @@ function getCategoryCopy(currentCategory) {
   background: #f7fbff;
 }
 
+.unavailable-state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 18px;
+  color: #6b6250;
+  text-align: center;
+  border: 1px dashed #e2d3ad;
+  border-radius: 12px;
+  background: #fffcf4;
+}
+
+.unavailable-state svg { color: #a8832f; }
+.unavailable-state h3 { margin: 0; color: #4a3d1f; }
+.unavailable-state p { max-width: 52ch; margin: 0; }
+
 .deleted-state svg {
   color: #687998;
 }
@@ -2388,6 +2479,15 @@ function getCategoryCopy(currentCategory) {
 }
 
 @media (max-width: 560px) {
+  .public-actions { gap: 8px; }
+
+  .portal-link {
+    max-width: 112px;
+    font-size: .78rem;
+    line-height: 1.15;
+    text-align: right;
+  }
+
   .brand-word {
     font-size: 1.22rem;
   }

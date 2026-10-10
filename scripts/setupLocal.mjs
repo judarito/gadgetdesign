@@ -56,6 +56,7 @@ await db.batch([
     short_code TEXT UNIQUE,
     auth_version INTEGER NOT NULL DEFAULT 1,
     clienteID INTEGER REFERENCES Clientes (id),
+    status TEXT NOT NULL DEFAULT 'activa',
     FOREIGN KEY (categoriaID) REFERENCES Categorias (id)
   )`,
   `CREATE TABLE IF NOT EXISTS ClientAccessCodes (
@@ -114,6 +115,7 @@ await db.batch([
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_entidades_token ON Entidades (token)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_normalized ON Clientes (LOWER(TRIM(email)))',
   'CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)',
+  'CREATE INDEX IF NOT EXISTS idx_entidades_status ON Entidades (status)',
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_lookup ON ClientAccessCodes (cliente_id, created_at)',
   `CREATE TABLE IF NOT EXISTS ClientOtpRequests (
     id INTEGER PRIMARY KEY,
@@ -173,9 +175,9 @@ const sampleData = JSON.stringify([
 ])
 await db.execute({
   sql: `INSERT INTO Entidades
-        (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version, clienteID)
+        (id, Identificacion, token, categoriaID, custom_data, short_code, auth_version, clienteID, status)
         VALUES (1, 'LOCAL-001', '11111111-1111-4111-8111-111111111111', 1, ?,
-                'Local001', 1, 1)
+                'Local001', 1, 1, 'activa')
         ON CONFLICT(id) DO UPDATE SET
           Identificacion = excluded.Identificacion,
           token = excluded.token,
@@ -183,10 +185,10 @@ await db.execute({
           custom_data = excluded.custom_data,
           short_code = excluded.short_code,
           auth_version = excluded.auth_version,
-          clienteID = excluded.clienteID`,
+          clienteID = excluded.clienteID,
+          status = excluded.status`,
   args: [sampleData],
 })
-
 await applyDataIntegrityConstraints(db)
 
 // La base local puede venir de antes con las columnas heredadas. Se eliminan

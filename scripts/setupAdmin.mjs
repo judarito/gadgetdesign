@@ -11,13 +11,37 @@ if (!url || !authToken) {
   throw new Error('Faltan TURSO_URL o TURSO_TOKEN en .env.')
 }
 
-// Este script es aditivo e idempotente, así que no hace falta confirmar nada,
-// pero saber contra qué base va evita sustos: es la única forma de distinguir de
-// un vistazo si estás apuntando a pruebas o a producción.
+// Este script es aditivo e idempotente, pero apuntarlo a la base equivocada
+// sigue siendo un error caro: se ejecutó una vez creyendo que probaba en local y
+// se aplicó a producción. Imprimir el destino no basta, así que hacia una base
+// que no parece de pruebas hay que nombrarla a propósito.
 const host = String(url).split('//')[1]?.split('.')[0] || String(url)
 console.log(`Base de datos destino: ${host}`)
 
+const esDestinoDePruebas = String(url).startsWith('file:') || host.includes('-dev')
+
+if (!esDestinoDePruebas && process.env.CONFIRM_TARGET !== host) {
+  console.error('')
+  console.error(`  Esta base no parece de pruebas: ${host}`)
+  console.error('  Si es la que quieres, nómbrala para que no se dé por supuesto:')
+  console.error('')
+  console.error(`    CONFIRM_TARGET=${host} npm run setup:admin`)
+  console.error('')
+  process.exit(1)
+}
+
 const db = createClient({ url, authToken })
+
+const resetAdminPassword = process.env.RESET_ADMIN_PASSWORD === 'true'
+const configuredAdminPassword = env.DEV_ADMIN_PASSWORD || process.env.DEV_ADMIN_PASSWORD
+
+if (resetAdminPassword && !esDestinoDePruebas) {
+  throw new Error('RESET_ADMIN_PASSWORD solo se permite contra una base de pruebas.')
+}
+
+if (resetAdminPassword && !configuredAdminPassword) {
+  throw new Error('Falta DEV_ADMIN_PASSWORD para actualizar la contraseña administrativa.')
+}
 
 await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -175,6 +199,14 @@ if (!entityColumns.rows.some((column) => column.name === 'clienteID')) {
 
 await db.execute('CREATE INDEX IF NOT EXISTS idx_entidades_cliente ON Entidades (clienteID)')
 
+// El estado de la ficha: lo que decide si se ve en público. El valor por defecto
+// es `activa` para que migrar no cambie lo que ya se veía.
+if (!entityColumns.rows.some((column) => column.name === 'status')) {
+  await db.execute("ALTER TABLE Entidades ADD COLUMN status TEXT NOT NULL DEFAULT 'activa'")
+}
+
+await db.execute('CREATE INDEX IF NOT EXISTS idx_entidades_status ON Entidades (status)')
+
 // Alta de clientes a partir de los dueños ya existentes. Solo aplica a bases
 // que todavía tienen las columnas heredadas; en una base nueva no hay nada que
 // migrar y esas columnas ya no se crean.
@@ -290,7 +322,20 @@ await applyDataIntegrityConstraints(db)
 
 const existing = await db.execute('SELECT id FROM AdminCredentials WHERE id = 1 LIMIT 1')
 
-if (existing.rows.length) {
+if (existing.rows.length && resetAdminPassword) {
+  const salt = randomBytes(16)
+  const iterations = 210000
+  const passwordHash = pbkdf2Sync(configuredAdminPassword, salt, iterations, 32, 'sha256').toString('hex')
+
+  await db.execute({
+    sql: `UPDATE AdminCredentials
+          SET password_hash = ?, salt = ?, iterations = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1`,
+    args: [passwordHash, salt.toString('hex'), iterations],
+  })
+
+  console.log('Contraseña administrativa actualizada desde DEV_ADMIN_PASSWORD.')
+} else if (existing.rows.length) {
   console.log('La credencial administrativa ya existe. No se modificó la contraseña.')
 } else {
   const temporaryPassword = randomBytes(15).toString('base64url')
