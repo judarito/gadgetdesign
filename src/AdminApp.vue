@@ -59,6 +59,7 @@ import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
 import Print3dDialog from './components/Print3dDialog.vue'
 import QrPreviewDialog from './components/QrPreviewDialog.vue'
+import CategoryDialog from './components/CategoryDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1096,17 +1097,7 @@ function emptyPagination() {
       </div>
     </div>
 
-    <v-dialog v-model="categoryDialog" max-width="520">
-      <v-card class="admin-dialog">
-        <div class="dialog-header"><div><Tag :size="21" /><h2>{{ categoryDraft.id ? 'Editar categoría' : 'Nueva categoría' }}</h2></div><button type="button" @click="categoryDialog = false"><X :size="21" /></button></div>
-        <form @submit.prevent="submitCategory">
-          <label class="field"><span>Nombre</span><input v-model="categoryDraft.name" maxlength="50" placeholder="Ej. Vehículos" /></label>
-          <label class="field"><span>Código para la URL</span><input v-model="categoryDraft.code" :maxlength="CATEGORY_CODE_MAX_LENGTH" placeholder="Ej. VEH" @input="categoryDraft.code = categoryDraft.code.toUpperCase()" /></label>
-          <label class="switch-field"><input v-model="categoryDraft.active" type="checkbox" /><span><strong>Categoría activa</strong><small>Disponible para nuevas entidades.</small></span></label>
-          <div class="dialog-actions"><v-btn variant="text" @click="categoryDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
-        </form>
-      </v-card>
-    </v-dialog>
+    <CategoryDialog v-model="categoryDialog" :draft="categoryDraft" :is-saving="isSaving" :max-code-length="CATEGORY_CODE_MAX_LENGTH" @submit="submitCategory" />
 
     <v-dialog v-model="suggestionDialog" max-width="520">
       <v-card class="admin-dialog">

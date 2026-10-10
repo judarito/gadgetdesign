@@ -136,7 +136,10 @@ usa como componente presentacional y el template legado ya fue retirado.
 También se extrajo `src/components/QrPreviewDialog.vue`, incluyendo la
 previsualización, URL pública y acceso a preparación de impresión; sus estilos
 ya no están duplicados en `AdminApp.vue`. `npm run lint` y `npm run build`
-pasan. Los demás diálogos y el listado siguen pendientes.
+pasan. Después se extrajo `src/components/CategoryDialog.vue`, conservando el
+borrador, validaciones de formulario y submit en `AdminApp.vue`; sus estilos
+locales evitan depender del alcance CSS del padre. Siguen pendientes los
+diálogos de sugerencias, entidades, clientes y lote, además del listado/editor.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
