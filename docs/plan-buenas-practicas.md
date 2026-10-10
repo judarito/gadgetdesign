@@ -152,8 +152,9 @@ creación y sus resultados. Queda pendiente el listado/editor de datos
 personalizados. Como primer paso se extrajo
 `src/components/CustomDataSuggestions.vue` con sus opciones, editor inline,
 protección y eventos del datepicker. El template anterior quedó desactivado
-temporalmente para retirar el duplicado después de verificar visualmente el
-nuevo componente junto con el listado.
+como referencia comentada, por lo que el componente nuevo es el único que se
+renderiza. Queda pendiente extraer el listado/editor de datos guardados y
+retirar esa referencia después de la verificación visual.
 
 ## Bloque 5: cobertura E2E y aislamiento
 

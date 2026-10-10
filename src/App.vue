@@ -735,7 +735,8 @@ function getCategoryCopy(currentCategory) {
               @save="saveNewDraft"
               @select="selectSuggestion"
             />
-            <section v-if="false && showSuggestions && !isLoading" class="suggestions-panel">
+            <!-- Legacy suggestion markup retained temporarily for visual diff.
+            <section v-if="showSuggestions && !isLoading" class="suggestions-panel">
               <div class="suggestions-heading">
                 <h3>Sugerencias para {{ category?.name || 'esta categoría' }}</h3>
                 <p>Selecciona una para agregarla.</p>
@@ -823,7 +824,7 @@ function getCategoryCopy(currentCategory) {
                   </v-btn>
                 </div>
               </form>
-            </section>
+            </section> -->
 
             <div v-if="savedDrafts.length" class="data-list" aria-label="Datos personalizados guardados">
               <form
