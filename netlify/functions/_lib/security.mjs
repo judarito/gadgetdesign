@@ -87,6 +87,13 @@ export function entityAccessScope(request, entity, cliente) {
   }
 
   const entitySession = getEntitySession(request)
+
+  // La sesión del QR solo vale mientras la ficha esté activa: desactivarla la
+  // retira del público, y con ella el acceso por el código impreso, así que quien
+  // tenga el QR no entra hasta que el administrador la reactive. El dueño sí
+  // sigue entrando desde el portal, que es la rama de arriba.
+  if (entitySession && (entity.status ?? 'activa') !== 'activa') return null
+
   if (
     entitySession &&
     Number(entitySession.entityId) === Number(entity.id) &&

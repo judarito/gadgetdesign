@@ -101,6 +101,19 @@ async function getContext(request, route, forceAuthorized = false) {
   // El alcance viaja al cliente: la pagina de la ficha borra la ficha entera
   // solo si la sesion es la de esa ficha, no la del portal.
   const scope = forceAuthorized ? 'entity' : entityAccessScope(request, entity, cliente)
+
+  // Una ficha que no está activa no sirve datos a quien no la administra: ni los
+  // públicos, ni siquiera enmascarados. Se responde con un estado propio para que
+  // la página pueda decir «no disponible» en vez de fingir que la ruta no existe:
+  // el QR va pegado a un objeto físico, y quien lo escanee merece saber qué pasa.
+  // El dueño desde el portal sí la ve, y esa rama la resuelve `scope`.
+  const publiclyAvailable = entity.status === 'activa'
+    && category.active
+    && (cliente === null || cliente.active)
+  if (!publiclyAvailable && !scope) {
+    return { category: null, entity: null, unavailable: true, suggestions: [], auth: emptyAuth() }
+  }
+
   const authorized = Boolean(scope)
   const suggestionsResult = await db.execute({
     sql: `SELECT id, name, data_type
@@ -117,6 +130,7 @@ async function getContext(request, route, forceAuthorized = false) {
       id: entity.id,
       displayName: entity.displayName,
       shortCode: entity.shortCode,
+      status: entity.status,
       customData: exposeCustomData(entity.customData, authorized),
     },
     suggestions: suggestionsResult.rows.map((row) => ({
@@ -137,8 +151,13 @@ async function getContext(request, route, forceAuthorized = false) {
 
 async function requestCode(request, payload) {
   const db = getDb()
-  const { entity, cliente } = await findEntity(db, payload)
+  const { entity, category, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
+  // Desactivada no hay nada que revelar, así que no se entrega código: quien
+  // tenga el QR impreso espera a que el administrador la reactive.
+  if (entity.status !== 'activa' || !category?.active) {
+    throw new HttpError(409, 'Esta ficha no está disponible.')
+  }
   if (!cliente?.email || !cliente.active) {
     throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
   }
@@ -188,8 +207,11 @@ async function requestCode(request, payload) {
 
 async function verifyCode(request, payload) {
   const db = getDb()
-  const { entity, cliente } = await findEntity(db, payload)
+  const { entity, category, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
+  // Desactivada no hay nada que revelar, así que no se entrega código: quien
+  // tenga el QR impreso espera a que el administrador la reactive.
+  if (entity.status !== 'activa' || !category?.active) throw new HttpError(409, 'Esta ficha no está disponible.')
   if (!cliente?.email || !cliente.active) {
     throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
   }
@@ -346,7 +368,7 @@ async function findEntity(db, route) {
   const result = await db.execute({
     sql: `SELECT DISTINCT e.id, e.Identificacion AS display_name, e.token,
                  e.short_code, e.categoriaID, e.custom_data,
-                 e.auth_version, e.clienteID,
+                 e.auth_version, e.clienteID, e.status,
                  c.id AS category_id, c.name AS category_name,
                  c.active AS category_active, c.code AS category_code,
                  cl.id AS client_id, cl.name AS client_name,
@@ -373,6 +395,7 @@ async function findEntity(db, route) {
       categoriaID: Number(row.categoriaID),
       customData: parseCustomData(row.custom_data),
       authVersion: Number(row.auth_version || 1),
+      status: String(row.status || 'activa'),
     },
     category: {
       id: Number(row.category_id),

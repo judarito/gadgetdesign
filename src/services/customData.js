@@ -17,12 +17,12 @@ export function parseCustomData(rawValue) {
     if (Array.isArray(parsed)) {
       return parsed
         .filter((item) => item && typeof item === 'object')
-        .map((item, index) => normalizeItem(item, index))
+        .flatMap((item, index) => safelyNormalizeItem(item, index))
     }
 
     if (parsed && typeof parsed === 'object') {
-      return Object.entries(parsed).map(([key, value], index) =>
-        normalizeItem({ id: key, key, value }, index),
+      return Object.entries(parsed).flatMap(([key, value], index) =>
+        safelyNormalizeItem({ id: key, key, value }, index),
       )
     }
   } catch {
@@ -30,6 +30,15 @@ export function parseCustomData(rawValue) {
   }
 
   return []
+}
+
+function safelyNormalizeItem(item, index) {
+  try {
+    return [normalizeItem(item, index)]
+  } catch {
+    // Un dato corrupto no debe ocultar los demás datos válidos de la ficha.
+    return []
+  }
 }
 
 export function serializeCustomData(items) {

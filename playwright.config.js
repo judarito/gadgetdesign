@@ -13,6 +13,9 @@ export default defineConfig({
     : [['list']],
   use: {
     baseURL,
+    // Sin esto, una acción atascada espera hasta el límite del test y el
+    // fallo aparece como un timeout del test entero, sin decir cuál fue.
+    actionTimeout: 15_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

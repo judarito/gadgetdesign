@@ -240,7 +240,8 @@ async function createValidationTriggers(db) {
       OR LENGTH(NEW.short_code) > 8 OR NEW.short_code GLOB '*[^A-Za-z0-9_-]*'
     ))
     OR LENGTH(COALESCE(NEW.custom_data, '')) > 5000
-    OR NEW.auth_version < 1`
+    OR NEW.auth_version < 1
+    OR NEW.status IS NULL OR NEW.status NOT IN ('pendiente', 'activa', 'inactiva')`
   const aliasValidation = `
     NEW.code IS NULL OR NEW.code = '' OR NEW.code <> TRIM(NEW.code)
     OR LENGTH(NEW.code) > 40 OR NEW.code GLOB '*[^A-Za-z0-9_-]*'`
