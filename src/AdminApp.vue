@@ -60,6 +60,7 @@ import { getQrPrintMetrics } from './services/qrPrintMetrics'
 import Print3dDialog from './components/Print3dDialog.vue'
 import QrPreviewDialog from './components/QrPreviewDialog.vue'
 import CategoryDialog from './components/CategoryDialog.vue'
+import SuggestionDialog from './components/SuggestionDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1099,18 +1100,7 @@ function emptyPagination() {
 
     <CategoryDialog v-model="categoryDialog" :draft="categoryDraft" :is-saving="isSaving" :max-code-length="CATEGORY_CODE_MAX_LENGTH" @submit="submitCategory" />
 
-    <v-dialog v-model="suggestionDialog" max-width="520">
-      <v-card class="admin-dialog">
-        <div class="dialog-header"><div><Lightbulb :size="21" /><h2>{{ suggestionDraft.id ? 'Editar sugerencia' : 'Nueva sugerencia' }}</h2></div><button type="button" @click="suggestionDialog = false"><X :size="21" /></button></div>
-        <form @submit.prevent="submitSuggestion">
-          <label class="field"><span>Dato sugerido</span><input v-model="suggestionDraft.name" maxlength="50" placeholder="Ej. Vencimiento SOAT" /></label>
-          <label class="field"><span>Tipo de información</span><select v-model="suggestionDraft.dataType"><option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">{{ type.label }}</option></select></label>
-          <label class="field"><span>Orden</span><input v-model.number="suggestionDraft.sortOrder" min="0" max="9999" type="number" /></label>
-          <label class="switch-field"><input v-model="suggestionDraft.active" type="checkbox" /><span><strong>Sugerencia activa</strong><small>Visible para entidades sin datos.</small></span></label>
-          <div class="dialog-actions"><v-btn variant="text" @click="suggestionDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
-        </form>
-      </v-card>
-    </v-dialog>
+    <SuggestionDialog v-model="suggestionDialog" :data-types="CUSTOM_DATA_TYPES" :draft="suggestionDraft" :is-saving="isSaving" @submit="submitSuggestion" />
 
     <v-dialog v-model="entityDialog" max-width="620">
       <v-card class="admin-dialog">

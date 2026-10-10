@@ -139,7 +139,9 @@ ya no están duplicados en `AdminApp.vue`. `npm run lint` y `npm run build`
 pasan. Después se extrajo `src/components/CategoryDialog.vue`, conservando el
 borrador, validaciones de formulario y submit en `AdminApp.vue`; sus estilos
 locales evitan depender del alcance CSS del padre. Siguen pendientes los
-diálogos de sugerencias, entidades, clientes y lote, además del listado/editor.
+diálogos de entidades, clientes y lote, además del listado/editor. También se
+extrajo `src/components/SuggestionDialog.vue`, con los tipos de información
+recibidos por prop y el mismo contrato de submit controlado por el padre.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
