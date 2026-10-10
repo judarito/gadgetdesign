@@ -61,6 +61,7 @@ import Print3dDialog from './components/Print3dDialog.vue'
 import QrPreviewDialog from './components/QrPreviewDialog.vue'
 import CategoryDialog from './components/CategoryDialog.vue'
 import SuggestionDialog from './components/SuggestionDialog.vue'
+import EntityDialog from './components/EntityDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1102,32 +1103,7 @@ function emptyPagination() {
 
     <SuggestionDialog v-model="suggestionDialog" :data-types="CUSTOM_DATA_TYPES" :draft="suggestionDraft" :is-saving="isSaving" @submit="submitSuggestion" />
 
-    <v-dialog v-model="entityDialog" max-width="620">
-      <v-card class="admin-dialog">
-        <div class="dialog-header"><div><Users :size="21" /><h2>{{ entityDraft.id ? 'Editar entidad' : 'Nueva entidad' }}</h2></div><button type="button" @click="entityDialog = false"><X :size="21" /></button></div>
-        <form @submit.prevent="submitEntity">
-          <label class="field"><span>Nombre visible</span><input v-model="entityDraft.displayName" :maxlength="DISPLAY_NAME_MAX_LENGTH" placeholder="Ej. Max, ABC-123 o Maleta azul" /></label>
-          <label class="field"><span>Categoría</span><select v-model="entityDraft.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option></select></label>
-          <label class="field">
-            <span>Cliente <small>Opcional</small></span>
-            <select v-model="entityDraft.clienteId">
-              <option :value="null">Sin cliente (solo lectura)</option>
-              <option v-for="client in clients" :key="client.id" :value="client.id">{{ client.name }} · {{ client.email }}</option>
-              <option value="new">＋ Nuevo cliente…</option>
-            </select>
-          </label>
-          <template v-if="entityDraft.clienteId === 'new'">
-            <label class="field"><span>Nombre del cliente</span><input v-model="entityDraft.newClient.name" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
-            <label class="field"><span>Correo de acceso</span><input v-model="entityDraft.newClient.email" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
-            <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="entityDraft.newClient.phone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
-          </template>
-          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso a modificaciones</strong><span>{{ entityDraft.clienteId ? 'El cliente recibe el código para ver datos protegidos y administrar todas sus fichas.' : 'Sin cliente, la ficha pública permanecerá en modo solo lectura.' }}</span></p></div>
-          <div v-if="!entityDraft.id" class="guid-preview"><KeyRound :size="19" /><p><strong>Acceso seguro automático</strong><span>Se generará un GUID interno y un código corto para la URL.</span></p></div>
-          <div v-else class="url-preview"><span>URL actual</span><code>{{ buildUrl(categories.find((item) => item.id === Number(entityDraft.categoryId))?.code, entityDraft.shortCode || entityDraft.token, Boolean(entityDraft.shortCode)) }}</code></div>
-          <div class="dialog-actions"><v-btn variant="text" @click="entityDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
-        </form>
-      </v-card>
-    </v-dialog>
+    <EntityDialog v-model="entityDialog" :build-url="buildUrl" :categories="categories" :clients="clients" :display-name-max-length="DISPLAY_NAME_MAX_LENGTH" :draft="entityDraft" :is-saving="isSaving" @submit="submitEntity" />
 
     <v-dialog v-model="clientDialog" max-width="520">
       <v-card class="admin-dialog">

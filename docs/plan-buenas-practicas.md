@@ -142,6 +142,10 @@ locales evitan depender del alcance CSS del padre. Siguen pendientes los
 diálogos de entidades, clientes y lote, además del listado/editor. También se
 extrajo `src/components/SuggestionDialog.vue`, con los tipos de información
 recibidos por prop y el mismo contrato de submit controlado por el padre.
+Finalmente se extrajo `src/components/EntityDialog.vue`, incluyendo la
+selección de cliente, alta de cliente y vista previa de URL; el padre conserva
+el submit y la lógica de negocio. Quedan pendientes los diálogos de clientes
+y lote, además del listado/editor.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
