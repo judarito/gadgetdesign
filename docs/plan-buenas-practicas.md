@@ -146,6 +146,13 @@ el build no aumenta errores y no hay regresiones visuales evidentes.
 **Aceptacion:** la suite E2E pasa dos veces consecutivas contra dev y no deja
 clientes, fichas ni códigos de prueba abandonados.
 
+Avance 2026-10-10: los escenarios E2E existentes cubren metadata, acceso al
+portal, entidades duplicadas, QR/SVG, estados activa/inactiva/pendiente y alta
+desde portal. La ejecución contra dev quedó bloqueada antes de iniciar porque
+Playwright no está instalado en `node_modules` y `npx` no pudo descargarlo por
+timeout de red. No se marca el bloque como completado hasta ejecutar la suite
+dos veces contra dev.
+
 ## Bloque 6: documentacion y PR
 
 - [ ] Actualizar README con comandos de desarrollo y verificacion.
