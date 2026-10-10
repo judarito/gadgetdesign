@@ -58,6 +58,7 @@ import { CATEGORY_CODE_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from './services/va
 import { CUSTOM_DATA_TYPES, getDataType } from './services/dataTypes'
 import { createSlicerQrSvg } from './services/qrSvg'
 import { getQrPrintMetrics } from './services/qrPrintMetrics'
+import Print3dDialog from './components/Print3dDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1229,7 +1230,18 @@ function emptyPagination() {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="printDialog" max-width="760">
+    <Print3dDialog
+      v-model="printDialog"
+      :entity="printEntity"
+      :entity-url="printEntity ? buildEntityUrl(printEntity) : ''"
+      :metrics="printMetrics"
+      :settings="printSettings"
+      :is-saving="isSaving"
+      @download-svg="downloadPrintSvg"
+      @download-stl="downloadPrintStl"
+    />
+
+    <v-dialog v-if="false" v-model="printDialog" max-width="760">
       <v-card class="admin-dialog print-dialog">
         <div class="dialog-header">
           <div><Printer :size="21" /><h2>Preparar impresión 3D</h2></div>

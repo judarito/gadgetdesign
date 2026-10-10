@@ -130,6 +130,12 @@ La suite pasó con los puertos locales alternativos.
 **Aceptacion:** cada componente conserva pruebas y responsabilidades claras,
 el build no aumenta errores y no hay regresiones visuales evidentes.
 
+Avance 2026-10-10: se extrajo `src/components/Print3dDialog.vue` con sus
+controles, métricas, descargas SVG/STL y estilos responsive. `AdminApp.vue` lo
+usa como componente presentacional. Lint y build pasan; queda retirar el bloque
+de template legado que se mantiene desactivado como referencia durante esta
+primera extracción. Los demás diálogos y el listado siguen pendientes.
+
 ## Bloque 5: cobertura E2E y aislamiento
 
 - [ ] Cubrir acceso público al portal.
