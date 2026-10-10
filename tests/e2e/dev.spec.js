@@ -64,6 +64,15 @@ test('sitio dev responde y expone metadata del despliegue', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Mis fichas' })).toBeVisible()
 })
 
+test('la ficha pública ofrece acceso discreto al portal del propietario', async ({ page }) => {
+  await page.goto('/VEH/euSb1XjJPlzm')
+  const portalLink = page.getByRole('link', { name: 'Acceso del propietario' })
+  await expect(portalLink).toHaveAttribute('href', '/portal')
+  await portalLink.click()
+  await expect(page).toHaveURL(/\/portal$/)
+  await expect(page.getByRole('heading', { name: 'Mis fichas' })).toBeVisible()
+})
+
 test('admin permite dos fichas con el mismo nombre visible y ambas rutas públicas funcionan', async ({ page }) => {
   if (!adminPassword) {
     throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
@@ -108,6 +117,22 @@ test('admin permite dos fichas con el mismo nombre visible y ambas rutas públic
       await expect(publicPage.getByText(displayName, { exact: true }).first()).toBeVisible()
       await publicPage.close()
     }
+
+    await rows.first().getByTitle('Ver código QR').click()
+    const qrDialog = page.locator('.v-dialog.v-overlay--active').filter({ hasText: 'Código QR' })
+    await expect(qrDialog).toBeVisible()
+    await qrDialog.getByRole('button', { name: 'Preparar impresión 3D' }).click()
+    const printDialog = page.locator('.v-dialog.v-overlay--active').filter({ hasText: 'Preparar impresión 3D' })
+    await expect(printDialog).toBeVisible()
+    const qrSize = printDialog.getByLabel('Tamaño del QR en milímetros')
+    await qrSize.fill('26')
+    await expect(qrSize).toHaveValue('26')
+
+    const downloadPromise = page.waitForEvent('download')
+    await printDialog.getByRole('button', { name: 'Descargar SVG' }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/\.svg$/)
+    await printDialog.getByRole('button', { name: 'Cerrar' }).click()
   } finally {
     const list = await api.get(
       `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
