@@ -103,6 +103,7 @@ await db.batch([
     password_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
     iterations INTEGER NOT NULL DEFAULT 210000,
+    session_version INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS AdminLoginAttempts (
@@ -126,6 +127,11 @@ await db.batch([
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
   'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
 ], 'write')
+
+const adminCredentialColumns = await db.execute('PRAGMA table_info(AdminCredentials)')
+if (!adminCredentialColumns.rows.some((column) => column.name === 'session_version')) {
+  await db.execute('ALTER TABLE AdminCredentials ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
+}
 
 // La base local puede venir de una versión anterior sin la columna.
 const localEntityColumns = await db.execute('PRAGMA table_info(Entidades)')

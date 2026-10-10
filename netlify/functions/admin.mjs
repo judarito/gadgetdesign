@@ -52,9 +52,10 @@ export default async function handler(request) {
       return json({ ok: true }, 200, { 'set-cookie': clearCookie(ADMIN_COOKIE, request) })
     }
 
-    requireAdmin(request)
+    const adminSession = requireAdmin(request)
     const body = request.method === 'GET' ? null : await readJson(request)
     const db = getDb()
+    await assertAdminSessionVersion(db, adminSession)
 
     if (request.method === 'POST' && action === 'change-password') return await changePassword(db, body)
     if (request.method === 'GET' && action === 'category-options') return json(await listCategoryOptions(db))
@@ -99,7 +100,7 @@ async function login(request, payload) {
     throw new HttpError(429, 'Demasiados intentos. Espera 15 minutos antes de volver a intentar.')
   }
 
-  const result = await db.execute('SELECT password_hash, salt, iterations FROM AdminCredentials WHERE id = 1 LIMIT 1')
+  const result = await db.execute('SELECT password_hash, salt, iterations, session_version FROM AdminCredentials WHERE id = 1 LIMIT 1')
   const credential = result.rows[0]
   if (!credential) throw new HttpError(503, 'El administrador aún no está configurado.')
 
@@ -115,7 +116,7 @@ async function login(request, payload) {
 
   await db.execute({ sql: 'DELETE FROM AdminLoginAttempts WHERE request_ip = ?', args: [ip] })
 
-  const token = signSession({ type: 'admin' }, ADMIN_SESSION_SECONDS)
+  const token = signSession({ type: 'admin', ver: Number(credential.session_version || 1) }, ADMIN_SESSION_SECONDS)
   return json(
     { authenticated: true },
     200,
@@ -139,11 +140,21 @@ async function changePassword(db, payload) {
   const passwordHash = pbkdf2Sync(newPassword, salt, iterations, 32, 'sha256').toString('hex')
   await db.execute({
     sql: `UPDATE AdminCredentials
-          SET password_hash = ?, salt = ?, iterations = ?, updated_at = CURRENT_TIMESTAMP
+          SET password_hash = ?, salt = ?, iterations = ?,
+              session_version = session_version + 1,
+              updated_at = CURRENT_TIMESTAMP
           WHERE id = 1`,
     args: [passwordHash, salt.toString('hex'), iterations],
   })
   return json({ ok: true })
+}
+
+async function assertAdminSessionVersion(db, session) {
+  const result = await db.execute('SELECT session_version FROM AdminCredentials WHERE id = 1 LIMIT 1')
+  const currentVersion = Number(result.rows[0]?.session_version || 0)
+  if (!currentVersion || Number(session.ver || 0) !== currentVersion) {
+    throw new HttpError(401, 'La sesión administrativa fue invalidada. Inicia sesión nuevamente.')
+  }
 }
 
 async function listCategoryOptions(db) {

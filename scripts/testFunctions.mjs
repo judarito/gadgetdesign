@@ -228,8 +228,31 @@ try {
   const login = await request('admin', 'login', {
     method: 'POST', body: { password: 'GadgetLocal2026!' }, includeResponse: true,
   })
-  const adminCookie = getCookieHeader(login.response)
+  let adminCookie = getCookieHeader(login.response)
   assert(adminCookie, 'El login administrativo debe crear una cookie segura.')
+
+  const rotatedAdminPassword = 'GadgetLocal2026!2'
+  await request('admin', 'change-password', {
+    method: 'POST', cookie: adminCookie,
+    body: { currentPassword: 'GadgetLocal2026!', newPassword: rotatedAdminPassword },
+  })
+  await expectStatus(() => request('admin', 'category-options', { cookie: adminCookie }), 401,
+    'Cambiar la contraseña debe invalidar la sesión administrativa anterior.')
+  const rotatedLogin = await request('admin', 'login', {
+    method: 'POST', body: { password: rotatedAdminPassword }, includeResponse: true,
+  })
+  adminCookie = getCookieHeader(rotatedLogin.response)
+  assert(adminCookie, 'La nueva contraseña debe permitir iniciar sesión.')
+  await request('admin', 'change-password', {
+    method: 'POST', cookie: adminCookie,
+    body: { currentPassword: rotatedAdminPassword, newPassword: 'GadgetLocal2026!' },
+  })
+  const restoredLogin = await request('admin', 'login', {
+    method: 'POST', body: { password: 'GadgetLocal2026!' }, includeResponse: true,
+  })
+  adminCookie = getCookieHeader(restoredLogin.response)
+  assert(adminCookie, 'La contraseña local debe restaurarse para el resto de la suite.')
+
   const entities = await request('admin', 'entities', { cookie: adminCookie })
   assert(entities.items[0].clientEmail === 'cliente@example.com', 'El administrador debe recibir los datos de contacto.')
   const repeatedName = await request('admin', 'create-entity', {

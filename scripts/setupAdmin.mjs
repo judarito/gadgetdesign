@@ -48,8 +48,14 @@ await db.execute(`CREATE TABLE IF NOT EXISTS AdminCredentials (
   password_hash TEXT NOT NULL,
   salt TEXT NOT NULL,
   iterations INTEGER NOT NULL DEFAULT 210000,
+  session_version INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`)
+
+const adminCredentialColumns = await db.execute('PRAGMA table_info(AdminCredentials)')
+if (!adminCredentialColumns.rows.some((column) => column.name === 'session_version')) {
+  await db.execute('ALTER TABLE AdminCredentials ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
+}
 
 await db.execute(`CREATE TABLE IF NOT EXISTS AdminLoginAttempts (
   id INTEGER PRIMARY KEY,
