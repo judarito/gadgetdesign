@@ -22,7 +22,8 @@ import {
 } from './_lib/security.mjs'
 import { purgeEntityCache } from './_lib/cache.mjs'
 import { CUSTOM_DATA_LIMIT, parseCustomData } from '../../src/services/customData.js'
-import { sanitizeText } from '../../src/services/validation.js'
+import { DISPLAY_NAME_MAX_LENGTH, sanitizeText } from '../../src/services/validation.js'
+import { generateUniqueShortCode } from '../../src/services/shortCode.js'
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
@@ -32,6 +33,8 @@ const OTP_WINDOW_SECONDS = 900
 const OTP_MAX_ATTEMPTS = 5
 const OTP_RETENTION_SECONDS = 86400
 const EMAIL_MAX_LENGTH = 254
+const MAX_ENTITIES_PER_CLIENT = 50
+const MAX_PENDING_ENTITIES_PER_CLIENT = 5
 
 export default async function handler(request) {
   try {
@@ -52,6 +55,9 @@ export default async function handler(request) {
     }
     if (request.method === 'POST' && action === 'deactivate-entity') {
       return await deactivateOwnEntity(request, await readJson(request))
+    }
+    if (request.method === 'POST' && action === 'create-entity') {
+      return await createOwnEntity(request, await readJson(request))
     }
 
     throw new HttpError(404, 'Operación no encontrada.')
@@ -110,12 +116,85 @@ async function buildContext(db, cliente, params) {
   return {
     cliente: { name: cliente.name, email: cliente.email },
     items: result.rows.map(mapEntity),
+    categories: await listActiveCategories(db),
     total,
     totalPages,
     page,
     pageSize,
     customDataLimit: CUSTOM_DATA_LIMIT,
   }
+}
+
+async function listActiveCategories(db) {
+  const result = await db.execute({
+    sql: `SELECT id, name, code FROM Categorias WHERE active = 1 ORDER BY name`,
+  })
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    name: String(row.name),
+    code: String(row.code),
+  }))
+}
+
+/**
+ * El cliente puede proponer una ficha, pero nunca publicarla ni elegir al
+ * propietario desde el cuerpo. La pertenencia y el estado inicial salen de la
+ * sesion y de esta Function, no del navegador.
+ */
+async function createOwnEntity(request, payload) {
+  const db = getDb()
+  const session = getClientSession(request)
+  const cliente = session ? await loadClient(db, session.clienteId) : null
+  requireClientSession(request, cliente)
+
+  const displayName = sanitizeText(payload.displayName)
+  if (!displayName) throw new HttpError(400, 'Escribe un nombre para la ficha.')
+  if (displayName.length > DISPLAY_NAME_MAX_LENGTH) {
+    throw new HttpError(400, `El nombre no puede superar ${DISPLAY_NAME_MAX_LENGTH} caracteres.`)
+  }
+
+  const categoryId = Number(payload.categoryId)
+  if (!Number.isInteger(categoryId) || categoryId <= 0) {
+    throw new HttpError(400, 'Selecciona una categoría válida.')
+  }
+
+  const category = await db.execute({
+    sql: 'SELECT id FROM Categorias WHERE id = ? AND active = 1 LIMIT 1',
+    args: [categoryId],
+  })
+  if (!category.rows[0]) throw new HttpError(400, 'La categoría no está disponible.')
+
+  const counts = await db.execute({
+    sql: `SELECT COUNT(*) AS total,
+                 SUM(CASE WHEN status = 'pendiente' THEN 1 ELSE 0 END) AS pending
+          FROM Entidades WHERE clienteID = ?`,
+    args: [cliente.id],
+  })
+  const total = Number(counts.rows[0]?.total || 0)
+  const pending = Number(counts.rows[0]?.pending || 0)
+  if (total >= MAX_ENTITIES_PER_CLIENT) {
+    throw new HttpError(409, `Has alcanzado el máximo de ${MAX_ENTITIES_PER_CLIENT} fichas.`)
+  }
+  if (pending >= MAX_PENDING_ENTITIES_PER_CLIENT) {
+    throw new HttpError(409, `Solo puedes tener ${MAX_PENDING_ENTITIES_PER_CLIENT} fichas pendientes a la vez.`)
+  }
+
+  const token = crypto.randomUUID()
+  const shortCode = await generateUniqueShortCode(db)
+  const inserted = await db.execute({
+    sql: `INSERT INTO Entidades
+          (Identificacion, token, short_code, categoriaID, custom_data, auth_version, clienteID, status)
+          VALUES (?, ?, ?, ?, '[]', 1, ?, 'pendiente')`,
+    args: [displayName, token, shortCode, categoryId, cliente.id],
+  })
+
+  return json({
+    ok: true,
+    id: Number(inserted.lastInsertRowid),
+    displayName,
+    shortCode,
+    status: 'pendiente',
+  }, 201)
 }
 
 /**

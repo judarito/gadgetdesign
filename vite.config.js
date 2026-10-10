@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 
 export default defineConfig(() => {
+  const functionsPort = Number(process.env.NETLIFY_FUNCTIONS_PORT || 9999)
+
   return {
     plugins: [
       vue({
@@ -15,7 +17,7 @@ export default defineConfig(() => {
     server: {
       proxy: {
         '/.netlify/functions': {
-          target: 'http://127.0.0.1:9999',
+          target: `http://127.0.0.1:${functionsPort}`,
           changeOrigin: true,
         },
       },

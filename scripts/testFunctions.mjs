@@ -393,6 +393,34 @@ try {
     'El portal debe emitir su propia cookie de sesión.')
   assert(portalLogin.data.cliente.email === 'finca@example.com', 'El portal debe saludar al cliente.')
   assert(portalLogin.data.total === 7, 'El portal debe listar todas las fichas del cliente.')
+  assert(portalLogin.data.categories.some((category) => category.id === motoCategoryId),
+    'El portal debe recibir las categorías activas para proponer fichas.')
+
+  await expectStatus(() => request('client', 'create-entity', {
+    method: 'POST', body: { displayName: 'SIN-SESION', categoryId: motoCategoryId },
+  }), 401, 'Crear una ficha debe exigir sesión de cliente.')
+
+  const proposed = await request('client', 'create-entity', {
+    method: 'POST', cookie: clientCookie,
+    body: { displayName: 'PROPUESTA-PORTAL', categoryId: motoCategoryId },
+  })
+  assert(proposed.status === 'pendiente' && proposed.shortCode,
+    'Una ficha creada desde el portal debe nacer pendiente y recibir código corto.')
+  const proposedPublic = await request('entity', 'context', {
+    query: { token: proposed.shortCode },
+  })
+  assert(proposedPublic.unavailable === true && proposedPublic.entity === null,
+    'Una ficha propuesta no debe publicarse antes de la aprobación.')
+  const approved = await request('admin', 'set-entity-status', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: proposed.id, status: 'activa' },
+  })
+  assert(approved.status === 'activa', 'El administrador debe poder aprobar la propuesta.')
+  const approvedPublic = await request('entity', 'context', {
+    query: { token: proposed.shortCode },
+  })
+  assert(approvedPublic.entity?.displayName === 'PROPUESTA-PORTAL',
+    'Una ficha aprobada debe volver a ser pública con el mismo código.')
 
   const noPending = await statusOf(() => request('client', 'verify-code', {
     method: 'POST', body: { email: 'finca@example.com', code: '000002' },
@@ -413,7 +441,7 @@ try {
   const portalContext = await request('client', 'context', {
     cookie: clientCookie, includeResponse: true,
   })
-  assert(portalContext.data.total === 7, 'El listado del portal debe mantenerse con la sesión.')
+  assert(portalContext.data.total === 8, 'El listado del portal debe incluir la ficha propuesta.')
   assert(portalContext.response.headers.get('netlify-cdn-cache-control') === 'no-store',
     'El listado del portal nunca debe cachearse en el CDN.')
 
@@ -488,6 +516,28 @@ try {
     'Un cliente desactivado debe dejar sus fichas en solo lectura.')
   assert(deactivated.auth.emailHint === '',
     'Un cliente desactivado no debe publicar ni la pista de su correo.')
+  const hiddenByClient = await request('entity', 'context', { query: { token: moto1.shortCode } })
+  assert(hiddenByClient.unavailable === true && hiddenByClient.entity === null,
+    'Las fichas de un cliente inactivo no deben ser públicas.')
+
+  await request('admin', 'save-client', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: newClient.id, name: 'Finca El Paraíso', email: 'nueva@example.com', active: true },
+  })
+  await request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: motoCategoryId, name: 'Motos', code: 'MOTO', active: false },
+  })
+  const hiddenByCategory = await request('entity', 'context', { query: { token: moto1.shortCode } })
+  assert(hiddenByCategory.unavailable === true && hiddenByCategory.entity === null,
+    'Las fichas de una categoría inactiva no deben ser públicas.')
+  await expectStatus(() => request('entity', 'request-code', {
+    method: 'POST', body: { token: moto1.shortCode },
+  }), 409, 'Una categoría inactiva no debe permitir solicitar códigos.')
+  await request('admin', 'save-category', {
+    method: 'POST', cookie: adminCookie,
+    body: { id: motoCategoryId, name: 'Motos', code: 'MOTO', active: true },
+  })
 
   // --- Límites de la creación masiva -------------------------------------
   await expectStatus(() => request('admin', 'bulk-create-entities', {

@@ -9,6 +9,7 @@ import {
   LogOut,
   Mail,
   Package,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 } from '@lucide/vue'
 import {
   deactivateClientEntity,
+  createClientEntity,
   getPortalContext,
   logoutClientAccess,
   requestClientAccessCode,
@@ -24,6 +26,7 @@ import {
 
 const client = ref(null)
 const items = ref([])
+const categories = ref([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
@@ -42,6 +45,9 @@ const devCode = ref('')
 // Mientras se comprueba si ya hay sesión no debe verse el formulario de correo:
 // un cliente con sesión abierta vería un parpadeo del login antes del listado.
 const checkingSession = ref(true)
+const createDialog = ref(false)
+const newDisplayName = ref('')
+const newCategoryId = ref(null)
 
 const isAuthenticated = computed(() => Boolean(client.value))
 const pending = computed(() => Math.max(total.value - items.value.length, 0))
@@ -67,6 +73,7 @@ onMounted(async () => {
 
 function applyContext(result, { append = false } = {}) {
   client.value = result.cliente
+  categories.value = result.categories || []
   // El servidor pagina de 50 en 50: sin acumular, un cliente con muchas fichas
   // (una finca con cien vacas) vería el total pero solo la primera página.
   items.value = append ? [...items.value, ...(result.items || [])] : (result.items || [])
@@ -74,6 +81,24 @@ function applyContext(result, { append = false } = {}) {
   page.value = Number(result.page || 1)
   code.value = ''
   devCode.value = ''
+}
+
+function openCreateDialog() {
+  newDisplayName.value = ''
+  newCategoryId.value = categories.value[0]?.id || null
+  createDialog.value = true
+}
+
+async function createEntity() {
+  if (!newDisplayName.value.trim() || !newCategoryId.value) return
+  await runAction(async () => {
+    await createClientEntity(newDisplayName.value.trim(), newCategoryId.value)
+    createDialog.value = false
+    await runLoad(async () => {
+      applyContext(await getPortalContext({ search: search.value }))
+    })
+    showToast('Ficha enviada. Quedará disponible cuando el administrador la apruebe.')
+  })
 }
 
 async function loadMore() {
@@ -359,6 +384,16 @@ function showToast(message, color = 'success') {
             </label>
             <v-btn class="filter-button" color="primary" type="submit" variant="tonal">Buscar</v-btn>
           </form>
+
+          <v-btn
+            class="create-button"
+            color="primary"
+            :disabled="!categories.length"
+            variant="flat"
+            @click="openCreateDialog"
+          >
+            <Plus :size="18" /> Nueva ficha
+          </v-btn>
         </div>
 
         <div v-if="isLoading && !items.length" class="data-table">
@@ -431,6 +466,32 @@ function showToast(message, color = 'success') {
       </section>
     </div>
 
+    <v-dialog v-model="createDialog" max-width="520">
+      <v-card class="create-dialog">
+        <v-card-title>Proponer una ficha</v-card-title>
+        <v-card-text>
+          <p class="dialog-copy">La ficha quedará pendiente de aprobación. Cuando el administrador la apruebe podrás verla públicamente.</p>
+          <label class="field">
+            <span>Nombre visible</span>
+            <input v-model="newDisplayName" maxlength="150" placeholder="Ej. Vehículo de Juan" />
+          </label>
+          <label class="field dialog-field">
+            <span>Categoría</span>
+            <select v-model="newCategoryId">
+              <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option>
+            </select>
+          </label>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="createDialog = false">Cancelar</v-btn>
+          <v-btn color="primary" :disabled="!newDisplayName.trim() || !newCategoryId" :loading="isSaving" @click="createEntity">
+            Enviar para aprobación
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-snackbar v-model="toast.visible" :color="toast.color" :timeout="3200" location="bottom">
       {{ toast.message }}
       <template #actions>
@@ -488,8 +549,13 @@ button { letter-spacing: 0; }
 .code-input { letter-spacing: .5em; text-align: center; font-size: 1.35rem !important; }
 .primary-command { margin-top: 20px; min-height: 46px; text-transform: none; font-weight: 750; letter-spacing: 0; }
 .primary-command :deep(.v-btn__content) { gap: 8px; }
+.create-button :deep(.v-btn__content) { display: inline-flex; align-items: center; gap: 7px; }
 .alert { display: flex; align-items: center; gap: 9px; margin: 16px 0 0; padding: 12px 14px; border-radius: 6px; font-weight: 650; }
 .alert--error { color: #a41924; background: #fff0f1; border: 1px solid #ffcfd3; }
+.create-dialog { border-radius: 8px !important; }
+.dialog-copy { margin: 0 0 20px; color: #66758c; line-height: 1.5; }
+.dialog-field { margin-top: 16px; }
+.field select { width: 100%; min-height: 44px; padding: 0 12px; color: #121a2d; background: #fff; border: 1px solid #cdd9e7; border-radius: 6px; }
 
 /* --- Aviso de pruebas: el código en pantalla -------------------------- */
 .dev-hint {

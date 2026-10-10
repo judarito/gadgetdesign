@@ -18,10 +18,12 @@ async function abrirComoPublico(page, url) {
 const expectedHost = 'gadgetdesign-dev.netlify.app'
 const targetURL = process.env.E2E_BASE_URL || `https://${expectedHost}`
 const adminPassword = process.env.DEV_ADMIN_PASSWORD || ''
+const localE2E = process.env.ALLOW_LOCAL_E2E === 'true'
 
 test.beforeAll(() => {
   const host = new URL(targetURL).host
-  if (host !== expectedHost) {
+  const isLocalhost = host === 'localhost:5173' || host === '127.0.0.1:5173'
+  if (host !== expectedHost && !(localE2E && isLocalhost)) {
     throw new Error(`E2E bloqueado: solo puede ejecutarse contra ${expectedHost}, no contra ${host}.`)
   }
 })
@@ -285,9 +287,90 @@ test('el cliente desactiva su ficha desde el portal', async ({ page }) => {
   }
 })
 
+test('el cliente propone una ficha desde el portal y queda pendiente de aprobación', async ({ page }) => {
+  test.slow()
+
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const email = `e2e-${runId}@example.com`
+  const displayName = `E2E-Propuesta-${runId}`
+  const api = page.context().request
+  let clientId
+
+  try {
+    const login = await api.post('/.netlify/functions/admin?action=login', {
+      data: { password: adminPassword },
+    })
+    expect(login.ok()).toBeTruthy()
+
+    const categories = await (await api.get('/.netlify/functions/admin?action=category-options')).json()
+    expect(categories.length).toBeGreaterThan(0)
+    const client = await api.post('/.netlify/functions/admin?action=save-client', {
+      data: { name: `Cliente ${runId}`, email, phone: '', active: true },
+    })
+    expect(client.ok()).toBeTruthy()
+    clientId = (await client.json()).id
+
+    await page.goto('/portal')
+    await page.getByLabel('Correo electrónico').fill(email)
+    await page.getByRole('button', { name: 'Enviar código' }).click()
+    const aviso = page.locator('.dev-hint')
+    await expect(aviso).toBeVisible()
+    const codigo = (await aviso.textContent()).match(/\d{6}/)?.[0]
+    expect(codigo).toBeTruthy()
+    await page.getByLabel('Código').fill(codigo)
+    await page.getByRole('button', { name: 'Entrar' }).click()
+    await expect(page.getByRole('heading', { name: `Cliente ${runId}` })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Nueva ficha' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('pendiente de aprobación')
+    await dialog.getByLabel('Nombre visible').fill(displayName)
+    await dialog.getByLabel('Categoría').selectOption(String(categories[0].id))
+
+    // El formulario debe seguir contenido en viewport móvil.
+    await page.setViewportSize({ width: 390, height: 844 })
+    const box = await dialog.boundingBox()
+    expect(box).toBeTruthy()
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+
+    await dialog.getByRole('button', { name: 'Enviar para aprobación' }).click()
+    await expect(dialog).toBeHidden()
+    const row = page.locator('.entity-row').filter({ hasText: displayName })
+    await expect(row).toHaveCount(1)
+    await expect(row.locator('.status-pill')).toHaveText('Pendiente de aprobación')
+    await expect(page.locator('.v-snackbar')).toContainText('administrador la apruebe')
+
+    const listado = await (await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )).json()
+    expect(listado.items[0].status).toBe('pendiente')
+  } finally {
+    const list = await api.get(
+      `/.netlify/functions/admin?action=entities&search=${encodeURIComponent(displayName)}&pageSize=50`,
+    )
+    if (list.ok()) {
+      const payload = await list.json()
+      for (const entity of payload.items || []) {
+        if (entity.displayName === displayName) {
+          await api.delete('/.netlify/functions/admin?action=delete-entity', { data: { id: entity.id } })
+        }
+      }
+    }
+    if (clientId) {
+      await api.delete('/.netlify/functions/admin?action=delete-client', { data: { id: clientId } })
+    }
+  }
+})
+
 test('una ficha pendiente no se publica hasta que el administrador la aprueba', async ({ page }) => {
-  // Hoy nadie crea fichas pendientes por la interfaz —eso llega en la fase 2—, así
-  // que se deja en ese estado por la API para poder comprobar lo que ve cada uno.
+  // Esta prueba cubre la aprobación y el aislamiento público; el alta desde el
+  // portal se prueba en el escenario anterior.
   if (!adminPassword) {
     throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
   }

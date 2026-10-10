@@ -107,7 +107,10 @@ async function getContext(request, route, forceAuthorized = false) {
   // la página pueda decir «no disponible» en vez de fingir que la ruta no existe:
   // el QR va pegado a un objeto físico, y quien lo escanee merece saber qué pasa.
   // El dueño desde el portal sí la ve, y esa rama la resuelve `scope`.
-  if (entity.status !== 'activa' && !scope) {
+  const publiclyAvailable = entity.status === 'activa'
+    && category.active
+    && (cliente === null || cliente.active)
+  if (!publiclyAvailable && !scope) {
     return { category: null, entity: null, unavailable: true, suggestions: [], auth: emptyAuth() }
   }
 
@@ -148,11 +151,13 @@ async function getContext(request, route, forceAuthorized = false) {
 
 async function requestCode(request, payload) {
   const db = getDb()
-  const { entity, cliente } = await findEntity(db, payload)
+  const { entity, category, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
   // Desactivada no hay nada que revelar, así que no se entrega código: quien
   // tenga el QR impreso espera a que el administrador la reactive.
-  if (entity.status !== 'activa') throw new HttpError(409, 'Esta ficha no está disponible.')
+  if (entity.status !== 'activa' || !category?.active) {
+    throw new HttpError(409, 'Esta ficha no está disponible.')
+  }
   if (!cliente?.email || !cliente.active) {
     throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
   }
@@ -202,11 +207,11 @@ async function requestCode(request, payload) {
 
 async function verifyCode(request, payload) {
   const db = getDb()
-  const { entity, cliente } = await findEntity(db, payload)
+  const { entity, category, cliente } = await findEntity(db, payload)
   if (!entity) throw new HttpError(404, 'No se encontró la entidad.')
   // Desactivada no hay nada que revelar, así que no se entrega código: quien
   // tenga el QR impreso espera a que el administrador la reactive.
-  if (entity.status !== 'activa') throw new HttpError(409, 'Esta ficha no está disponible.')
+  if (entity.status !== 'activa' || !category?.active) throw new HttpError(409, 'Esta ficha no está disponible.')
   if (!cliente?.email || !cliente.active) {
     throw new HttpError(409, 'Esta entidad todavía no tiene un correo de acceso configurado.')
   }

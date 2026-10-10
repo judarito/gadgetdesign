@@ -16,6 +16,14 @@ export function deactivateClientEntity(token) {
   return apiRequest('client', { action: 'deactivate-entity', method: 'POST', body: { token } })
 }
 
+export function createClientEntity(displayName, categoryId) {
+  return apiRequest('client', {
+    action: 'create-entity',
+    method: 'POST',
+    body: { displayName, categoryId },
+  })
+}
+
 export function logoutClientAccess() {
   return apiRequest('client', { action: 'logout', method: 'POST', body: {} })
 }
