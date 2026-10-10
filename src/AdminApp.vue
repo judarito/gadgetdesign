@@ -62,6 +62,7 @@ import QrPreviewDialog from './components/QrPreviewDialog.vue'
 import CategoryDialog from './components/CategoryDialog.vue'
 import SuggestionDialog from './components/SuggestionDialog.vue'
 import EntityDialog from './components/EntityDialog.vue'
+import ClientDialog from './components/ClientDialog.vue'
 
 // El origen real, no un dominio fijo: el panel se usa igual en producción, en
 // el sitio de pruebas y en local, y las URLs copiadas deben apuntar a donde
@@ -1105,19 +1106,7 @@ function emptyPagination() {
 
     <EntityDialog v-model="entityDialog" :build-url="buildUrl" :categories="categories" :clients="clients" :display-name-max-length="DISPLAY_NAME_MAX_LENGTH" :draft="entityDraft" :is-saving="isSaving" @submit="submitEntity" />
 
-    <v-dialog v-model="clientDialog" max-width="520">
-      <v-card class="admin-dialog">
-        <div class="dialog-header"><div><Contact :size="21" /><h2>{{ clientDraft.id ? 'Editar cliente' : 'Nuevo cliente' }}</h2></div><button type="button" @click="clientDialog = false"><X :size="21" /></button></div>
-        <form @submit.prevent="submitClient">
-          <label class="field"><span>Nombre</span><input v-model="clientDraft.name" maxlength="100" autocomplete="name" placeholder="Ej. Carlos Mendoza" /></label>
-          <label class="field"><span>Correo de acceso</span><input v-model="clientDraft.email" maxlength="254" type="email" autocomplete="email" placeholder="nombre@correo.com" /></label>
-          <label class="field"><span>Número de celular <small>Opcional</small></span><input v-model="clientDraft.phone" maxlength="30" type="tel" autocomplete="tel" placeholder="Ej. +57 300 000 0000" /></label>
-          <label class="switch-field"><input v-model="clientDraft.active" type="checkbox" /><span><strong>Cliente activo</strong><small>Si lo desactivas, sus fichas quedan en solo lectura sin borrar nada.</small></span></label>
-          <div class="guid-preview"><ShieldCheck :size="19" /><p><strong>Acceso del cliente</strong><span>Con este correo administra todas sus fichas. Cambiarlo cierra sus sesiones abiertas.</span></p></div>
-          <div class="dialog-actions"><v-btn variant="text" @click="clientDialog = false">Cancelar</v-btn><v-btn color="primary" :loading="isSaving" type="submit" variant="flat"><Save :size="18" /> Guardar</v-btn></div>
-        </form>
-      </v-card>
-    </v-dialog>
+    <ClientDialog v-model="clientDialog" :draft="clientDraft" :is-saving="isSaving" @submit="submitClient" />
 
     <v-dialog v-model="bulkDialog" max-width="620">
       <v-card class="admin-dialog">

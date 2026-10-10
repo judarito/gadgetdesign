@@ -144,8 +144,9 @@ extrajo `src/components/SuggestionDialog.vue`, con los tipos de información
 recibidos por prop y el mismo contrato de submit controlado por el padre.
 Finalmente se extrajo `src/components/EntityDialog.vue`, incluyendo la
 selección de cliente, alta de cliente y vista previa de URL; el padre conserva
-el submit y la lógica de negocio. Quedan pendientes los diálogos de clientes
-y lote, además del listado/editor.
+el submit y la lógica de negocio. También se extrajo
+`src/components/ClientDialog.vue`, manteniendo en el padre la persistencia y
+las notificaciones. Queda pendiente el diálogo de lote y el listado/editor.
 
 ## Bloque 5: cobertura E2E y aislamiento
 
