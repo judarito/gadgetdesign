@@ -11,10 +11,14 @@
  */
 export default async function handler(request) {
   const buildInfo = await readBuildInfo(request)
+  const hostname = new URL(request.url).hostname
+  const environment = hostname === 'gadgetdesign-dev.netlify.app'
+    ? 'dev'
+    : buildInfo?.context || process.env.CONTEXT || process.env.NODE_ENV || 'unknown'
 
   return new Response(JSON.stringify({
     status: 'ok',
-    environment: buildInfo?.context || process.env.CONTEXT || process.env.NODE_ENV || 'unknown',
+    environment,
     commit: buildInfo?.commit || process.env.COMMIT_REF || process.env.HEAD || null,
   }), {
     status: 200,
