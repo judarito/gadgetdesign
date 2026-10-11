@@ -25,3 +25,12 @@ jobs:
         run: npm ci
       - name: Verify project
         run: npm run verify
+      - name: Install Playwright browser
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        run: npx playwright install --with-deps chromium
+      - name: Run E2E against dev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        env:
+          E2E_BASE_URL: https://gadgetdesign-dev.netlify.app
+          DEV_ADMIN_PASSWORD: ${{ secrets.DEV_ADMIN_PASSWORD }}
+        run: npm run test:e2e
