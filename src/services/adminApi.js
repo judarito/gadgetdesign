@@ -52,6 +52,18 @@ export function deleteSuggestion(id, categoryId) {
   return apiRequest('admin', { action: 'delete-suggestion', method: 'DELETE', body: { id, categoryId } })
 }
 
+export function listEventTypes(categoryId) {
+  return apiRequest('admin', { action: 'event-types', query: { categoryId } })
+}
+
+export function saveEventType(eventType) {
+  return apiRequest('admin', { action: 'save-event-type', method: 'POST', body: eventType })
+}
+
+export function deleteEventType(id) {
+  return apiRequest('admin', { action: 'delete-event-type', method: 'DELETE', body: { id } })
+}
+
 export function listClientOptions() {
   return apiRequest('admin', { action: 'client-options' })
 }

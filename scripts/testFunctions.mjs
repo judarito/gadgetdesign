@@ -164,6 +164,41 @@ try {
       `Un dato protegido de tipo ${caso.dataType} debe guardarse y devolverse en claro al dueño.`)
   }
 
+  await expectStatus(() => request('entity', 'create-event', {
+    method: 'POST', body: { ...route, eventTypeId: 1, title: 'Sin permiso', occurredAt: '2026-01-01' },
+  }), 401, 'Crear un evento debe exigir autorización.')
+  const createdEvent = await request('entity', 'create-event', {
+    method: 'POST', cookie: entityCookie,
+    body: {
+      ...route,
+      eventTypeId: 1,
+      title: 'Cambio de aceite',
+      occurredAt: '2026-02-15',
+      description: 'Mantenimiento preventivo',
+      values: [{ fieldName: 'Kilometraje', dataType: 'number', value: '42000', protected: false },
+        { fieldName: 'Factura', dataType: 'text', value: 'FAC-123', protected: true }],
+    },
+  })
+  const publicEvents = await request('entity', 'events', { query: route })
+  const publicEvent = publicEvents.events.find((item) => item.id === createdEvent.eventId)
+  assert(publicEvent?.title === 'Cambio de aceite', 'El evento debe aparecer en la línea de tiempo pública.')
+  assert(publicEvent.values.some((item) => item.fieldName === 'Factura' && item.masked && item.value === ''),
+    'Los valores protegidos del evento deben llegar enmascarados.')
+  const privateEvents = await request('entity', 'events', { query: route, cookie: entityCookie })
+  const privateEvent = privateEvents.events.find((item) => item.id === createdEvent.eventId)
+  assert(privateEvent.values.some((item) => item.fieldName === 'Factura' && item.value === 'FAC-123'),
+    'La sesión autorizada debe revelar los valores protegidos del evento.')
+  await request('entity', 'update-event', {
+    method: 'PATCH', cookie: entityCookie,
+    body: { ...route, eventId: createdEvent.eventId, eventTypeId: 1, title: 'Cambio de aceite actualizado', occurredAt: '2026-02-15', description: '' },
+  })
+  await request('entity', 'archive-event', {
+    method: 'PATCH', cookie: entityCookie,
+    body: { ...route, eventId: createdEvent.eventId },
+  })
+  const archivedEvents = await request('entity', 'events', { query: route })
+  assert(!archivedEvents.events.some((item) => item.id === createdEvent.eventId), 'Un evento archivado no debe aparecer en la consulta pública.')
+
   const db = createClient({ url: localTursoUrl })
   const stored = await db.execute("SELECT custom_data FROM Entidades WHERE short_code = 'Local001'")
   assert(!String(stored.rows[0].custom_data).includes('VALOR-SENSIBLE'), 'El valor protegido no debe guardarse en texto plano.')

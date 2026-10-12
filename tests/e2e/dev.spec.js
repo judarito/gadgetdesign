@@ -73,6 +73,40 @@ test('la ficha pública ofrece acceso discreto al portal del propietario', async
   await expect(page.getByRole('heading', { name: 'Mis fichas' })).toBeVisible()
 })
 
+test('admin configura tipos y campos de eventos por categoría', async ({ page }) => {
+  if (!adminPassword) {
+    throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')
+  }
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const eventName = `Mantenimiento E2E ${runId}`
+  const api = page.context().request
+  let createdId
+
+  await iniciarSesionAdmin(page)
+  try {
+    await page.getByRole('button', { name: 'Tipos de eventos' }).click()
+    await expect(page.getByRole('heading', { name: 'Tipos de eventos' })).toBeVisible()
+    await page.getByRole('button', { name: 'Nuevo tipo' }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Nombre').fill(eventName)
+    await dialog.getByRole('button', { name: 'Agregar campo' }).click()
+    await dialog.getByLabel('Nombre del campo').fill('Kilometraje')
+    await dialog.getByRole('button', { name: 'Guardar' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(page.getByText(eventName, { exact: true })).toBeVisible()
+
+    const types = await api.get('/.netlify/functions/admin?action=event-types&categoryId=1')
+    expect(types.ok()).toBeTruthy()
+    const item = (await types.json()).items.find((candidate) => candidate.name === eventName)
+    expect(item.fields).toEqual([{ name: 'Kilometraje', dataType: 'text', protected: false }])
+    createdId = item.id
+  } finally {
+    if (createdId) {
+      await api.delete('/.netlify/functions/admin?action=delete-event-type', { data: { id: createdId } })
+    }
+  }
+})
+
 test('admin permite dos fichas con el mismo nombre visible y ambas rutas públicas funcionan', async ({ page }) => {
   if (!adminPassword) {
     throw new Error('Falta el secreto DEV_ADMIN_PASSWORD para ejecutar el E2E administrativo.')

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CalendarDays,
   EyeOff,
+  History,
   LockKeyhole,
   LogOut,
   Mail,
@@ -16,9 +17,16 @@ import {
 import {
   CUSTOM_DATA_LIMIT,
   createCustomData,
+  createEntityEvent,
+  deleteEventImage,
+  updateEntityEvent,
+  archiveEntityEvent,
+  requestEventImageSignature,
+  attachEventImage,
   deleteCustomData,
   deleteEntityProfile,
   fetchEntity,
+  fetchEntityEvents,
   getRouteContext,
   logoutEntityAccess,
   requestEntityAccessCode,
@@ -37,6 +45,8 @@ const category = ref(null)
 const entity = ref(null)
 const customData = ref([])
 const suggestions = ref([])
+const eventTypes = ref([])
+const events = ref([])
 const savedDrafts = ref([])
 const suggestionDrafts = ref([])
 const selectedSuggestionId = ref(null)
@@ -44,6 +54,12 @@ const newDraft = ref({ key: '', value: '', dataType: 'text', protected: false })
 const auth = ref({ authorized: false, canRequestCode: false, emailHint: '' })
 const accessDialog = ref(false)
 const newDataDialog = ref(false)
+const eventDialog = ref(false)
+const newEvent = ref({ eventTypeId: null, title: '', occurredAt: '', description: '', values: [] })
+const editingEventId = ref(null)
+const eventImage = ref(null)
+const protectEventImage = ref(false)
+const eventImageInput = ref(null)
 const deleteDataDialog = ref(false)
 const privacyDialog = ref(false)
 const deleteEntityDialog = ref(false)
@@ -174,7 +190,15 @@ async function loadEntity() {
 
   await runRequest(async () => {
     applyContext(await fetchEntity(routeContext.categoryCode, routeContext.token))
+    events.value = (await fetchEntityEvents(routeContext.categoryCode, routeContext.token)).events || []
   }, true)
+}
+
+function formatEventDate(value) {
+  if (!value) return 'Fecha no indicada'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium' }).format(date)
 }
 
 async function saveNewDraft(draft, requestKey) {
@@ -372,6 +396,7 @@ function applyContext(context) {
   entity.value = context.entity
   customData.value = context.entity?.customData || []
   suggestions.value = context.suggestions || []
+  eventTypes.value = context.eventTypes || []
   auth.value = context.auth || { authorized: false, canRequestCode: false, emailHint: '' }
   savedDrafts.value = customData.value.map((item) => ({ ...item }))
   editingId.value = null
@@ -392,6 +417,110 @@ function applyContext(context) {
     }))
   selectedSuggestionId.value = null
   newDraft.value = { key: '', value: '', dataType: 'text', protected: false }
+}
+
+function openEventDialog() {
+  if (!canUseCrud.value) return requestProtectedAccess()
+  newEvent.value = {
+    eventTypeId: eventTypes.value[0]?.id || null,
+    title: '',
+    occurredAt: new Date().toISOString().slice(0, 10),
+    description: '',
+    values: eventTypeFields(eventTypes.value[0]),
+  }
+  eventImage.value = null
+  protectEventImage.value = false
+  editingEventId.value = null
+  eventDialog.value = true
+}
+
+function editEvent(event) {
+  if (!canUseCrud.value) return requestProtectedAccess()
+  editingEventId.value = event.id
+  newEvent.value = {
+    eventTypeId: event.eventType?.id || eventTypes.value[0]?.id || null,
+    title: event.title,
+    occurredAt: event.occurredAt || '',
+    description: event.description || '',
+    values: (event.values || []).map((value) => ({ ...value })),
+  }
+  eventImage.value = null
+  protectEventImage.value = Boolean(event.image?.protected)
+  eventDialog.value = true
+}
+
+function eventTypeFields(eventType) {
+  return (eventType?.fields || []).map((field) => ({
+    fieldName: field.name,
+    dataType: field.dataType || 'text',
+    value: '',
+    protected: Boolean(field.protected),
+  }))
+}
+
+function changeEventType() {
+  const type = eventTypes.value.find((item) => Number(item.id) === Number(newEvent.value.eventTypeId))
+  newEvent.value.values = eventTypeFields(type)
+}
+
+async function archiveEvent(event) {
+  if (!canUseCrud.value) return requestProtectedAccess()
+  if (!window.confirm(`¿Archivar el evento “${event.title}”?`)) return
+  await runRequest(async () => {
+    await archiveEntityEvent(routeContext.categoryCode, routeContext.token, event.id)
+    events.value = (await fetchEntityEvents(routeContext.categoryCode, routeContext.token)).events || []
+  }, false, `archive-event-${event.id}`, 'Evento archivado correctamente.')
+}
+
+async function removeEventImage(event) {
+  if (!canUseCrud.value) return requestProtectedAccess()
+  if (!window.confirm('¿Eliminar la imagen de este evento?')) return
+  await runRequest(async () => {
+    await deleteEventImage(routeContext.categoryCode, routeContext.token, event.id)
+    events.value = (await fetchEntityEvents(routeContext.categoryCode, routeContext.token)).events || []
+  }, false, `delete-event-image-${event.id}`, 'Imagen eliminada correctamente.')
+}
+
+function chooseEventImage(event) {
+  eventImage.value = event.target.files?.[0] || null
+}
+
+async function saveEvent() {
+  if (!newEvent.value.title.trim() || !newEvent.value.eventTypeId || !canUseCrud.value) return
+  await runRequest(async () => {
+    const eventPayload = {
+      ...newEvent.value,
+      values: newEvent.value.values.filter((value) => value.value.trim()),
+    }
+    const saved = editingEventId.value
+      ? await updateEntityEvent(routeContext.categoryCode, routeContext.token, editingEventId.value, eventPayload)
+      : await createEntityEvent(routeContext.categoryCode, routeContext.token, eventPayload)
+    const eventId = editingEventId.value || saved.eventId
+    if (eventImage.value) {
+      if (eventImage.value.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.')
+      const signature = await requestEventImageSignature(routeContext.categoryCode, routeContext.token, eventId)
+      const form = new FormData()
+      form.append('file', eventImage.value)
+      form.append('api_key', signature.apiKey)
+      form.append('timestamp', String(signature.timestamp))
+      form.append('folder', signature.folder)
+      form.append('public_id', signature.publicId)
+      form.append('signature', signature.signature)
+      const upload = await fetch(signature.uploadUrl, { method: 'POST', body: form })
+      if (!upload.ok) throw new Error('No se pudo subir la imagen.')
+      const uploaded = await upload.json()
+      await attachEventImage(routeContext.categoryCode, routeContext.token, eventId, {
+        publicId: uploaded.public_id,
+        secureUrl: uploaded.secure_url,
+        format: uploaded.format,
+        bytes: uploaded.bytes,
+        width: uploaded.width,
+        height: uploaded.height,
+      }, protectEventImage.value)
+    }
+    events.value = (await fetchEntityEvents(routeContext.categoryCode, routeContext.token)).events || []
+    eventDialog.value = false
+  }, false, 'create-event', 'Evento guardado correctamente.')
 }
 
 async function requestAccess() {
@@ -512,6 +641,7 @@ function getCategoryCopy(currentCategory) {
 
   if (subject) {
     return {
+      subject,
       title: `Datos de tu ${subject}`,
       newData: `Puedes agregar un nuevo dato para tu ${subject}.`,
     }
@@ -520,12 +650,14 @@ function getCategoryCopy(currentCategory) {
   const categoryName = String(currentCategory?.name || '').trim()
   if (categoryName) {
     return {
+      subject: categoryName,
       title: `Datos de ${categoryName}`,
       newData: `Puedes agregar un nuevo dato para la categoría ${categoryName}.`,
     }
   }
 
   return {
+    subject: 'ficha',
     title: 'Datos de esta ficha',
     newData: 'Puedes agregar un nuevo dato a esta ficha.',
   }
@@ -951,6 +1083,59 @@ function getCategoryCopy(currentCategory) {
               </form>
             </div>
 
+            <section v-if="!isLoading && events.length" class="event-history" aria-labelledby="event-history-title">
+              <div class="event-history__heading">
+                <div>
+                  <h3 id="event-history-title"><History :size="19" /> Hoja de vida</h3>
+                  <p>Consulta los cambios y acontecimientos registrados para esta ficha.</p>
+                </div>
+                <span class="event-history__count">{{ events.length }} {{ events.length === 1 ? 'evento' : 'eventos' }}</span>
+              </div>
+              <ol class="event-timeline">
+                <li v-for="event in events" :key="event.id" class="event-card">
+                  <div class="event-card__marker" aria-hidden="true"><History :size="16" /></div>
+                  <div class="event-card__body">
+                    <div class="event-card__topline">
+                      <div>
+                        <span v-if="event.eventType" class="event-card__type">{{ event.eventType.name }}</span>
+                        <h4>{{ event.title }}</h4>
+                      </div>
+                      <time :datetime="event.occurredAt || undefined">{{ formatEventDate(event.occurredAt) }}</time>
+                    </div>
+                    <p v-if="event.description" class="event-card__description">{{ event.description }}</p>
+                    <dl v-if="event.values.length" class="event-card__values">
+                      <template v-for="value in event.values" :key="`${event.id}-${value.fieldName}`">
+                        <dt>{{ value.fieldName }}</dt>
+                        <dd>{{ value.masked ? '••••••••' : value.value }}</dd>
+                      </template>
+                    </dl>
+                    <div v-if="event.image?.url" class="event-card__media">
+                      <img class="event-card__image" :src="event.image.url" alt="Imagen del evento" loading="lazy" />
+                      <v-btn size="small" variant="text" color="error" :disabled="isSaving" @click="removeEventImage(event)"><Trash2 :size="15" /> Eliminar imagen</v-btn>
+                    </div>
+                    <div class="event-card__actions">
+                      <v-btn icon variant="text" size="small" :disabled="isSaving" aria-label="Editar evento" @click="editEvent(event)">
+                        <AppIcon name="edit" />
+                      </v-btn>
+                      <v-btn icon variant="text" size="small" color="error" :disabled="isSaving" aria-label="Archivar evento" @click="archiveEvent(event)">
+                        <AppIcon name="trash" />
+                      </v-btn>
+                    </div>
+                  </div>
+                </li>
+              </ol>
+            </section>
+
+            <div v-if="!isLoading" class="event-history-action">
+              <div>
+                <strong>Agregar a la hoja de vida</strong>
+                <span>Registra un mantenimiento, visita o acontecimiento de tu {{ categoryCopy.subject || 'ficha' }}.</span>
+              </div>
+              <v-btn color="primary" variant="flat" :disabled="isSaving" @click="openEventDialog">
+                <Plus :size="19" /> Agregar evento
+              </v-btn>
+            </div>
+
             <div v-if="!isLoading && !isAtCustomDataLimit" class="new-data-action">
               <div>
                 <strong>Agregar otro dato</strong>
@@ -1074,6 +1259,54 @@ function getCategoryCopy(currentCategory) {
             >
               <Plus :size="18" /> Agregar dato
             </v-btn>
+          </div>
+        </form>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="eventDialog" max-width="620" persistent>
+      <v-card class="new-data-dialog">
+        <div class="new-data-dialog__heading">
+          <div class="new-data-dialog__icon"><History :size="26" /></div>
+          <div>
+            <h2>{{ editingEventId ? 'Editar evento' : 'Agregar evento' }}</h2>
+            <p>Registra algo importante en la hoja de vida de tu ficha.</p>
+          </div>
+        </div>
+        <form class="inline-row new-data-form" @submit.prevent="saveEvent">
+          <label>
+            <span>Tipo de evento</span>
+            <select v-model="newEvent.eventTypeId" :disabled="!canUseCrud" required @change="changeEventType">
+              <option v-for="type in eventTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
+            </select>
+          </label>
+          <label>
+            <span>Qué ocurrió</span>
+            <input v-model="newEvent.title" maxlength="120" placeholder="Ej. Cambio de aceite" required />
+          </label>
+          <label>
+            <span>Fecha</span>
+            <input v-model="newEvent.occurredAt" type="date" required />
+          </label>
+          <label>
+            <span>Descripción <small>Opcional</small></span>
+            <textarea v-model="newEvent.description" maxlength="1000" rows="3" placeholder="Agrega detalles del evento" />
+          </label>
+          <label v-for="value in newEvent.values" :key="value.fieldName">
+            <span>{{ value.fieldName }}<small v-if="value.protected"> · Protegido</small></span>
+            <input v-model="value.value" :type="getDataType(value.dataType).inputType" :placeholder="getDataType(value.dataType).placeholder" />
+          </label>
+          <label>
+            <span>Imagen <small>Opcional, máximo 5 MB</small></span>
+            <input ref="eventImageInput" type="file" accept="image/jpeg,image/png,image/webp" @change="chooseEventImage" />
+          </label>
+          <label class="protection-toggle">
+            <input v-model="protectEventImage" type="checkbox" />
+            <span><LockKeyhole :size="16" /> Proteger imagen</span>
+          </label>
+          <div class="new-data-form__actions">
+            <v-btn type="button" variant="text" @click="eventDialog = false">Cancelar</v-btn>
+            <v-btn color="primary" type="submit" variant="flat" :loading="savingKey === 'create-event'" :disabled="!newEvent.title.trim() || !newEvent.eventTypeId">{{ editingEventId ? 'Guardar cambios' : 'Guardar evento' }}</v-btn>
           </div>
         </form>
       </v-card>
@@ -1841,6 +2074,104 @@ function getCategoryCopy(currentCategory) {
   margin-right: 7px;
 }
 
+.event-history {
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid #d7e7fa;
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.event-history__heading,
+.event-card__topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.event-history__heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #17265e;
+  font-size: 1.02rem;
+}
+
+.event-history__heading p {
+  margin: 5px 0 0;
+  color: #6379a8;
+  font-size: .84rem;
+}
+
+.event-history__count,
+.event-card__type {
+  color: #42649a;
+  font-size: .76rem;
+  font-weight: 750;
+}
+
+.event-timeline {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-card {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dce9f8;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.event-card__marker {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: #116fd8;
+  border-radius: 50%;
+  background: #e9f3ff;
+}
+
+.event-card h4 {
+  margin: 2px 0 0;
+  color: #17265e;
+  font-size: .98rem;
+}
+
+.event-card time {
+  flex: 0 0 auto;
+  color: #6078a7;
+  font-size: .78rem;
+}
+
+.event-card__description {
+  margin: 9px 0 0;
+  color: #405b8e;
+  font-size: .87rem;
+}
+
+.event-card__values {
+  display: grid;
+  grid-template-columns: minmax(100px, .7fr) minmax(0, 1.3fr);
+  gap: 5px 12px;
+  margin: 12px 0 0;
+  font-size: .82rem;
+}
+
+.event-card__values dt { color: #6a80a9; }
+.event-card__values dd { margin: 0; color: #19265b; font-weight: 650; }
+.event-card__media { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; }
+.event-card__image { display: block; max-width: 180px; max-height: 140px; border-radius: 8px; object-fit: cover; }
+.event-card__actions { display: flex; justify-content: flex-end; gap: 2px; margin-top: 4px; }
+
 .suggestions-panel {
   margin: 0 0 14px;
   padding: 14px 16px;
@@ -2313,6 +2644,7 @@ function getCategoryCopy(currentCategory) {
   line-height: 1.45;
 }
 
+.event-history-action,
 .new-data-action {
   display: flex;
   align-items: center;
@@ -2323,22 +2655,26 @@ function getCategoryCopy(currentCategory) {
   border-top: 1px solid #e0ebf8;
 }
 
+.event-history-action > div,
 .new-data-action > div {
   display: grid;
   gap: 2px;
   color: #304d89;
 }
 
+.event-history-action strong,
 .new-data-action strong {
   color: #11154b;
   font-size: 0.98rem;
 }
 
+.event-history-action span,
 .new-data-action span {
   font-size: 0.86rem;
   line-height: 1.35;
 }
 
+.event-history-action :deep(.v-btn),
 .new-data-action :deep(.v-btn) {
   flex: 0 0 auto;
   min-height: 42px;
@@ -2346,6 +2682,7 @@ function getCategoryCopy(currentCategory) {
   letter-spacing: 0;
 }
 
+.event-history-action :deep(.v-btn__content),
 .new-data-action :deep(.v-btn__content),
 .new-data-form__actions :deep(.v-btn__content) {
   gap: 7px;
@@ -2502,6 +2839,13 @@ function getCategoryCopy(currentCategory) {
 
 @media (max-width: 560px) {
   .public-actions { gap: 8px; }
+
+  .event-history { padding: 14px; }
+  .event-history__heading { display: grid; gap: 6px; }
+  .event-card__topline { display: grid; gap: 6px; }
+  .event-card time { font-size: .75rem; }
+  .event-card__values { grid-template-columns: 1fr; gap: 2px; }
+  .event-card__values dd { margin-bottom: 6px; }
 
   .portal-link {
     max-width: 112px;
@@ -2675,11 +3019,13 @@ function getCategoryCopy(currentCategory) {
     width: 100%;
   }
 
+  .event-history-action,
   .new-data-action {
     align-items: stretch;
     flex-direction: column;
   }
 
+  .event-history-action :deep(.v-btn),
   .new-data-action :deep(.v-btn) {
     width: 100%;
   }

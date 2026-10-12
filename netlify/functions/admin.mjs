@@ -29,6 +29,7 @@ import {
 
 const CATEGORY_NAME_MAX_LENGTH = 50
 const SUGGESTION_NAME_MAX_LENGTH = 50
+const EVENT_TYPE_NAME_MAX_LENGTH = 80
 const CLIENT_NAME_MAX_LENGTH = 100
 const CLIENT_EMAIL_MAX_LENGTH = 254
 const CLIENT_PHONE_MAX_LENGTH = 30
@@ -65,6 +66,9 @@ export default async function handler(request) {
     if (request.method === 'GET' && action === 'suggestions') return json(await listSuggestions(db, url.searchParams))
     if (request.method === 'POST' && action === 'save-suggestion') return await saveSuggestion(db, body)
     if (request.method === 'DELETE' && action === 'delete-suggestion') return await deleteSuggestion(db, body)
+    if (request.method === 'GET' && action === 'event-types') return json(await listEventTypes(db, url.searchParams))
+    if (request.method === 'POST' && action === 'save-event-type') return await saveEventType(db, body)
+    if (request.method === 'DELETE' && action === 'delete-event-type') return await deleteEventType(db, body)
     if (request.method === 'GET' && action === 'clients') return json(await listClients(db, url.searchParams))
     if (request.method === 'GET' && action === 'client-options') return json(await listClientOptions(db))
     if (request.method === 'POST' && action === 'save-client') return await saveClient(db, body)
@@ -256,6 +260,61 @@ async function deleteSuggestion(db, payload) {
   await db.execute({ sql: 'DELETE FROM CategoriaSugerencias WHERE id = ? AND categoriaID = ?', args: [validId(payload.id, 'sugerencia'), categoryId] })
   await purgeCategoryCache(categoryId)
   return json({ ok: true })
+}
+
+async function listEventTypes(db, params) {
+  const categoryId = validId(params.get('categoryId'), 'categoría')
+  const result = await db.execute({
+    sql: `SELECT id, categoriaID, name, active, sort_order, fields_json
+          FROM EntityEventTypes WHERE categoriaID = ? ORDER BY sort_order, id`,
+    args: [categoryId],
+  })
+  return { items: result.rows.map((row) => ({
+    id: Number(row.id), categoryId: Number(row.categoriaID), name: String(row.name),
+    active: Boolean(row.active), sortOrder: Number(row.sort_order), fields: parseEventFields(row.fields_json),
+  })) }
+}
+
+async function saveEventType(db, payload) {
+  const categoryId = validId(payload.categoryId, 'categoría')
+  const name = requiredText(payload.name, EVENT_TYPE_NAME_MAX_LENGTH, 'Tipo de evento')
+  const sortOrder = Number(payload.sortOrder || 0)
+  if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) throw new HttpError(400, 'El orden debe estar entre 0 y 9999.')
+  const fields = normalizeEventFields(payload.fields)
+  if (payload.id) {
+    await db.execute({ sql: `UPDATE EntityEventTypes SET name = ?, active = ?, sort_order = ?, fields_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND categoriaID = ?`, args: [name, payload.active ? 1 : 0, sortOrder, JSON.stringify(fields), validId(payload.id, 'tipo de evento'), categoryId] })
+  } else {
+    await db.execute({ sql: `INSERT INTO EntityEventTypes (categoriaID, name, active, sort_order, fields_json) VALUES (?, ?, ?, ?, ?)`, args: [categoryId, name, payload.active ? 1 : 0, sortOrder, JSON.stringify(fields)] })
+  }
+  await purgeCategoryCache(categoryId)
+  return json({ ok: true })
+}
+
+async function deleteEventType(db, payload) {
+  const id = validId(payload.id, 'tipo de evento')
+  const dependencies = await db.execute({ sql: 'SELECT COUNT(*) AS total FROM EntityEvents WHERE event_type_id = ?', args: [id] })
+  if (Number(dependencies.rows[0]?.total || 0)) throw new HttpError(409, 'No puedes eliminar un tipo que ya tenga eventos. Desactívalo.')
+  await db.execute({ sql: 'DELETE FROM EntityEventTypes WHERE id = ?', args: [id] })
+  return json({ ok: true })
+}
+
+function normalizeEventFields(value) {
+  if (value === undefined || value === null || value === '') return []
+  if (!Array.isArray(value) || value.length > 20) throw new HttpError(400, 'Los campos del evento no son válidos.')
+  return value.map((field) => ({
+    name: requiredText(field?.name, 80, 'Campo del evento'),
+    dataType: normalizeDataType(field?.dataType),
+    protected: Boolean(field?.protected),
+  }))
+}
+
+function parseEventFields(value) {
+  try {
+    const fields = JSON.parse(String(value || '[]'))
+    return Array.isArray(fields) ? fields : []
+  } catch {
+    return []
+  }
 }
 
 async function listClients(db, params) {

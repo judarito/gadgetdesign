@@ -193,6 +193,63 @@ await db.execute(
   'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
 )
 
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityEventTypes (
+  id INTEGER PRIMARY KEY,
+  categoriaID INTEGER NOT NULL,
+  name TEXT(80) NOT NULL,
+  active NUMERIC NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  fields_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (categoriaID, name),
+  FOREIGN KEY (categoriaID) REFERENCES Categorias (id) ON DELETE CASCADE
+)`)
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityEvents (
+  id INTEGER PRIMARY KEY,
+  entity_id INTEGER NOT NULL,
+  event_type_id INTEGER NOT NULL,
+  title TEXT(120) NOT NULL,
+  occurred_at TEXT NOT NULL,
+  description TEXT,
+  archived_at TEXT,
+  created_by_type TEXT NOT NULL DEFAULT 'cliente',
+  created_by_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (entity_id) REFERENCES Entidades (id) ON DELETE CASCADE,
+  FOREIGN KEY (event_type_id) REFERENCES EntityEventTypes (id)
+)`)
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityEventValues (
+  id INTEGER PRIMARY KEY,
+  event_id INTEGER NOT NULL,
+  field_name TEXT(80) NOT NULL,
+  data_type TEXT(20) NOT NULL DEFAULT 'text',
+  value TEXT NOT NULL DEFAULT '',
+  protected NUMERIC NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (event_id, field_name),
+  FOREIGN KEY (event_id) REFERENCES EntityEvents (id) ON DELETE CASCADE
+)`)
+await db.execute(`CREATE TABLE IF NOT EXISTS EntityEventImages (
+  id INTEGER PRIMARY KEY,
+  event_id INTEGER NOT NULL UNIQUE,
+  public_id TEXT NOT NULL UNIQUE,
+  secure_url TEXT NOT NULL,
+  format TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  protected NUMERIC NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (event_id) REFERENCES EntityEvents (id) ON DELETE CASCADE
+)`)
+await db.execute('CREATE INDEX IF NOT EXISTS idx_event_types_category ON EntityEventTypes (categoriaID, active, sort_order)')
+await db.execute('CREATE INDEX IF NOT EXISTS idx_events_entity_date ON EntityEvents (entity_id, archived_at, occurred_at DESC)')
+await db.execute('CREATE INDEX IF NOT EXISTS idx_event_values_event ON EntityEventValues (event_id)')
+await db.execute('CREATE INDEX IF NOT EXISTS idx_event_images_event ON EntityEventImages (event_id)')
+
 
 // La limpieza por antigüedad no puede usar los índices que empiezan por id.
 await db.execute(

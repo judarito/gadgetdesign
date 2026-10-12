@@ -38,6 +38,7 @@ import {
   deleteClient,
   deleteEntity,
   deleteSuggestion,
+  deleteEventType,
   hasAdminSession,
   listCategories,
   listCategoryOptions,
@@ -45,10 +46,12 @@ import {
   listClients,
   listEntities,
   listSuggestions,
+  listEventTypes,
   regenerateEntityToken,
   saveCategory,
   saveClient,
   saveSuggestion,
+  saveEventType,
   setEntityStatus,
   updateEntity,
   verifyAdminPassword,
@@ -81,6 +84,7 @@ const sidebarOpen = ref(false)
 const categories = ref([])
 const categoryRows = ref([])
 const suggestions = ref([])
+const eventTypes = ref([])
 const entities = ref([])
 const clients = ref([])
 const clientRows = ref([])
@@ -100,6 +104,7 @@ const errorMessage = ref('')
 const toast = ref({ visible: false, message: '', color: 'success' })
 const categoryDialog = ref(false)
 const suggestionDialog = ref(false)
+const eventTypeDialog = ref(false)
 const entityDialog = ref(false)
 const clientDialog = ref(false)
 const bulkDialog = ref(false)
@@ -111,6 +116,7 @@ const printEntity = ref(null)
 const printSettings = ref(defaultPrintSettings())
 const categoryDraft = ref(emptyCategory())
 const suggestionDraft = ref(emptySuggestion())
+const eventTypeDraft = ref(emptyEventType())
 const entityDraft = ref(emptyEntity())
 const clientDraft = ref(emptyClient())
 const bulkDraft = ref(emptyBulk())
@@ -131,6 +137,7 @@ const pageTitle = computed(
       clients: 'Clientes',
       categories: 'Categorías',
       suggestions: 'Sugerencias',
+      eventTypes: 'Tipos de eventos',
       security: 'Seguridad',
     })[activeView.value],
 )
@@ -170,6 +177,7 @@ const navigation = [
   { id: 'clients', label: 'Clientes', icon: Contact },
   { id: 'categories', label: 'Categorías', icon: Tag },
   { id: 'suggestions', label: 'Sugerencias', icon: Lightbulb },
+  { id: 'eventTypes', label: 'Tipos de eventos', icon: Layers },
   { id: 'security', label: 'Seguridad', icon: ShieldCheck },
 ]
 
@@ -227,6 +235,7 @@ async function navigate(view) {
 
   if (view === 'categories' || view === 'security') return
   if (view === 'suggestions') await loadSuggestions()
+  if (view === 'eventTypes') await loadEventTypes()
   if (view === 'entities') await loadEntities()
   if (view === 'clients') await loadClients()
 }
@@ -252,6 +261,13 @@ async function loadSuggestions() {
     })
     suggestions.value = result.items
     suggestionPagination.value = result
+  })
+}
+
+async function loadEventTypes() {
+  if (!selectedCategoryId.value) { eventTypes.value = []; return }
+  await runLoad(async () => {
+    eventTypes.value = (await listEventTypes(selectedCategoryId.value)).items || []
   })
 }
 
@@ -342,6 +358,43 @@ async function removeCategory(category) {
 async function changeSuggestionCategory() {
   suggestionPagination.value.page = 1
   await loadSuggestions()
+}
+
+function openEventTypeDialog(eventType = null) {
+  if (!selectedCategoryId.value) return
+  eventTypeDraft.value = eventType
+    ? { ...eventType, fields: (eventType.fields || []).map((field) => ({ ...field })) }
+    : emptyEventType()
+  eventTypeDialog.value = true
+  clearMessages()
+}
+
+function addEventTypeField() {
+  if (eventTypeDraft.value.fields.length >= 20) return
+  eventTypeDraft.value.fields.push({ name: '', dataType: 'text', protected: false })
+}
+
+function removeEventTypeField(index) {
+  eventTypeDraft.value.fields.splice(index, 1)
+}
+
+async function submitEventType() {
+  if (isSaving.value) return
+  await runAction(async () => {
+    await saveEventType({ ...eventTypeDraft.value, categoryId: selectedCategoryId.value })
+    eventTypeDialog.value = false
+    await loadEventTypes()
+    notifySuccess(eventTypeDraft.value.id ? 'Tipo de evento actualizado.' : 'Tipo de evento creado.')
+  })
+}
+
+async function removeEventType(eventType) {
+  if (!window.confirm(`¿Eliminar el tipo “${eventType.name}”?`)) return
+  await runAction(async () => {
+    await deleteEventType(eventType.id)
+    await loadEventTypes()
+    notifySuccess('Tipo de evento eliminado.')
+  })
 }
 
 function openSuggestionDialog(suggestion = null) {
@@ -695,6 +748,10 @@ function emptySuggestion(categoryId = null, sortOrder = 10) {
   return { id: null, categoryId, name: '', active: true, sortOrder, dataType: 'text' }
 }
 
+function emptyEventType() {
+  return { id: null, name: '', active: true, sortOrder: 10, fields: [] }
+}
+
 function emptyClient() {
   return { id: null, name: '', email: '', phone: '', active: true }
 }
@@ -1025,6 +1082,39 @@ function emptyPagination() {
             </div>
           </div>
 
+          <div v-if="activeView === 'eventTypes'" class="view-section">
+            <div class="section-toolbar">
+              <div>
+                <h2>Tipos de eventos</h2>
+                <p>Configura los acontecimientos disponibles en la hoja de vida.</p>
+              </div>
+              <v-btn :disabled="!selectedCategoryId" color="primary" variant="flat" @click="openEventTypeDialog()">
+                <Plus :size="19" /> Nuevo tipo
+              </v-btn>
+            </div>
+            <label class="filter-field">
+              <span>Categoría</span>
+              <select v-model="selectedCategoryId" @change="loadEventTypes">
+                <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }} ({{ category.code }})</option>
+              </select>
+            </label>
+            <div class="data-table">
+              <div class="table-head suggestion-grid"><span>Tipo</span><span>Campos</span><span>Orden</span><span>Estado</span><span /></div>
+              <div v-if="isLoading" class="table-empty">Cargando tipos...</div>
+              <div v-else-if="!eventTypes.length" class="table-empty">No hay tipos configurados para esta categoría.</div>
+              <div v-for="eventType in eventTypes" :key="eventType.id" class="table-row suggestion-grid">
+                <div class="primary-cell"><span class="cell-icon"><Layers :size="18" /></span><strong>{{ eventType.name }}</strong></div>
+                <span>{{ eventType.fields.length }} campos</span>
+                <span>{{ eventType.sortOrder }}</span>
+                <span class="status-pill" :class="{ 'status-pill--off': !eventType.active }">{{ eventType.active ? 'Activo' : 'Inactivo' }}</span>
+                <div class="action-cell">
+                  <button type="button" title="Editar" @click="openEventTypeDialog(eventType)"><Pencil :size="18" /></button>
+                  <button type="button" class="danger" title="Eliminar" @click="removeEventType(eventType)"><Trash2 :size="18" /></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div v-if="activeView === 'clients'" class="view-section">
             <div class="section-toolbar">
               <div>
@@ -1104,6 +1194,32 @@ function emptyPagination() {
     <CategoryDialog v-model="categoryDialog" :draft="categoryDraft" :is-saving="isSaving" :max-code-length="CATEGORY_CODE_MAX_LENGTH" @submit="submitCategory" />
 
     <SuggestionDialog v-model="suggestionDialog" :data-types="CUSTOM_DATA_TYPES" :draft="suggestionDraft" :is-saving="isSaving" @submit="submitSuggestion" />
+    <v-dialog v-model="eventTypeDialog" max-width="560">
+      <v-card class="admin-dialog">
+        <h2>{{ eventTypeDraft.id ? 'Editar tipo de evento' : 'Nuevo tipo de evento' }}</h2>
+        <form class="admin-dialog-form" @submit.prevent="submitEventType">
+          <label>Nombre<input v-model="eventTypeDraft.name" maxlength="80" placeholder="Ej. Mantenimiento" required /></label>
+          <label>Orden<input v-model.number="eventTypeDraft.sortOrder" type="number" min="0" max="9999" required /></label>
+          <label class="checkbox-field"><input v-model="eventTypeDraft.active" type="checkbox" /> Activo</label>
+          <div class="event-fields-editor">
+            <div class="event-fields-editor__heading">
+              <strong>Campos del evento</strong>
+              <button type="button" @click="addEventTypeField"><Plus :size="15" /> Agregar campo</button>
+            </div>
+            <div v-if="!eventTypeDraft.fields.length" class="event-fields-editor__empty">Este evento no tiene campos adicionales.</div>
+            <div v-for="(field, index) in eventTypeDraft.fields" :key="index" class="event-field-row">
+              <input v-model="field.name" maxlength="80" placeholder="Ej. Kilometraje" aria-label="Nombre del campo" />
+              <select v-model="field.dataType" aria-label="Tipo de respuesta">
+                <option v-for="type in CUSTOM_DATA_TYPES" :key="type.value" :value="type.value">{{ type.label }}</option>
+              </select>
+              <label class="checkbox-field"><input v-model="field.protected" type="checkbox" /> Proteger</label>
+              <button type="button" class="danger-icon" aria-label="Quitar campo" @click="removeEventTypeField(index)"><X :size="17" /></button>
+            </div>
+          </div>
+          <div class="dialog-actions"><v-btn type="button" variant="text" @click="eventTypeDialog = false">Cancelar</v-btn><v-btn color="primary" type="submit" :loading="isSaving">Guardar</v-btn></div>
+        </form>
+      </v-card>
+    </v-dialog>
 
     <EntityDialog v-model="entityDialog" :build-url="buildUrl" :categories="categories" :clients="clients" :display-name-max-length="DISPLAY_NAME_MAX_LENGTH" :draft="entityDraft" :is-saving="isSaving" @submit="submitEntity" />
 
@@ -1275,6 +1391,15 @@ button { letter-spacing: 0; }
 .print-actions :deep(.v-btn__content) { gap: 8px; }
 .sidebar-backdrop { display: none; }
 
+.event-fields-editor { display: grid; gap: 10px; padding: 14px; border: 1px solid #dce6f2; border-radius: 10px; background: #f8fbff; }
+.event-fields-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #17366c; }
+.event-fields-editor__heading button { display: inline-flex; align-items: center; gap: 5px; color: #086ee8; font: inherit; font-size: .82rem; font-weight: 700; }
+.event-fields-editor__empty { color: #748298; font-size: .82rem; }
+.event-field-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto 32px; align-items: center; gap: 8px; }
+.event-field-row input, .event-field-row select { min-height: 38px; padding: 0 9px; color: #1a315f; background: #fff; border: 1px solid #cbdced; border-radius: 7px; }
+.event-field-row .checkbox-field { margin: 0; white-space: nowrap; font-size: .78rem; }
+.danger-icon { display: grid; width: 30px; height: 30px; place-items: center; color: #c52b35; border: 1px solid #f1c5c9; border-radius: 7px; }
+
 @media (max-width: 980px) {
   .sidebar { transform: translateX(-100%); transition: transform .2s ease; }
   .sidebar--open { transform: translateX(0); }
@@ -1287,6 +1412,9 @@ button { letter-spacing: 0; }
 }
 
 @media (max-width: 720px) {
+  .event-field-row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .event-field-row select, .event-field-row .checkbox-field { grid-column: 1; }
+  .event-field-row .danger-icon { grid-column: 2; grid-row: 1 / span 3; }
   .admin-header { min-height: 76px; padding: 13px 16px; }
   .admin-header h1 { font-size: 1.3rem; }
   .session-badge { width: 38px; height: 38px; padding: 0; justify-content: center; }

@@ -64,6 +64,48 @@ export function deleteCustomData(categoryCode, token, itemId) {
   })
 }
 
+export function fetchEntityEvents(categoryCode, token) {
+  return apiRequest('entity', { action: 'events', query: { categoryCode, token } })
+}
+
+export function createEntityEvent(categoryCode, token, event) {
+  return apiRequest('entity', {
+    action: 'create-event', method: 'POST', body: { categoryCode, token, ...event },
+  })
+}
+
+export function updateEntityEvent(categoryCode, token, eventId, event) {
+  return apiRequest('entity', {
+    action: 'update-event', method: 'PATCH', body: { categoryCode, token, eventId, ...event },
+  })
+}
+
+export function archiveEntityEvent(categoryCode, token, eventId) {
+  return apiRequest('entity', {
+    action: 'archive-event', method: 'PATCH', body: { categoryCode, token, eventId },
+  })
+}
+
+export function requestEventImageSignature(categoryCode, token, eventId) {
+  return apiRequest('entity', {
+    action: 'event-image-signature', method: 'POST', body: { categoryCode, token, eventId },
+  })
+}
+
+export function attachEventImage(categoryCode, token, eventId, image, protectedValue = false) {
+  return apiRequest('entity', {
+    action: 'attach-event-image',
+    method: 'POST',
+    body: { categoryCode, token, eventId, image, protected: protectedValue },
+  })
+}
+
+export function deleteEventImage(categoryCode, token, eventId) {
+  return apiRequest('entity', {
+    action: 'delete-event-image', method: 'DELETE', body: { categoryCode, token, eventId },
+  })
+}
+
 export function deleteEntityProfile(categoryCode, token, confirmation) {
   return apiRequest('entity', {
     action: 'delete-entity', method: 'DELETE', body: { categoryCode, token, confirmation },

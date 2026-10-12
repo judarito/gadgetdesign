@@ -126,6 +126,39 @@ await db.batch([
   'CREATE INDEX IF NOT EXISTS idx_client_otp_requests_ip ON ClientOtpRequests (request_ip, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_client_access_codes_created ON ClientAccessCodes (created_at)',
   'CREATE INDEX IF NOT EXISTS idx_entity_access_codes_created ON EntityAccessCodes (created_at)',
+  `CREATE TABLE IF NOT EXISTS EntityEventTypes (
+    id INTEGER PRIMARY KEY, categoriaID INTEGER NOT NULL, name TEXT(80) NOT NULL,
+    active NUMERIC NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0,
+    fields_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (categoriaID, name),
+    FOREIGN KEY (categoriaID) REFERENCES Categorias (id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS EntityEvents (
+    id INTEGER PRIMARY KEY, entity_id INTEGER NOT NULL, event_type_id INTEGER NOT NULL,
+    title TEXT(120) NOT NULL, occurred_at TEXT NOT NULL, description TEXT, archived_at TEXT,
+    created_by_type TEXT NOT NULL DEFAULT 'cliente', created_by_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (entity_id) REFERENCES Entidades (id) ON DELETE CASCADE,
+    FOREIGN KEY (event_type_id) REFERENCES EntityEventTypes (id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS EntityEventValues (
+    id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, field_name TEXT(80) NOT NULL,
+    data_type TEXT(20) NOT NULL DEFAULT 'text', value TEXT NOT NULL DEFAULT '',
+    protected NUMERIC NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (event_id, field_name),
+    FOREIGN KEY (event_id) REFERENCES EntityEvents (id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS EntityEventImages (
+    id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL UNIQUE, public_id TEXT NOT NULL UNIQUE,
+    secure_url TEXT NOT NULL, format TEXT NOT NULL, bytes INTEGER NOT NULL,
+    width INTEGER NOT NULL, height INTEGER NOT NULL, protected NUMERIC NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES EntityEvents (id) ON DELETE CASCADE
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_event_types_category ON EntityEventTypes (categoriaID, active, sort_order)',
+  'CREATE INDEX IF NOT EXISTS idx_events_entity_date ON EntityEvents (entity_id, archived_at, occurred_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_event_values_event ON EntityEventValues (event_id)',
+  'CREATE INDEX IF NOT EXISTS idx_event_images_event ON EntityEventImages (event_id)',
 ], 'write')
 
 const adminCredentialColumns = await db.execute('PRAGMA table_info(AdminCredentials)')
@@ -144,6 +177,10 @@ if (!localEntityColumns.rows.some((column) => column.name === 'clienteID')) {
 // de integración pueda ejecutarse dos veces seguidas sin chocar con lo que
 // dejó la ejecución anterior.
 await db.batch([
+  'DELETE FROM EntityEventImages',
+  'DELETE FROM EntityEventValues',
+  'DELETE FROM EntityEvents',
+  'DELETE FROM EntityEventTypes',
   'DELETE FROM EntityAccessCodes',
   'DELETE FROM ClientAccessCodes',
   'DELETE FROM ClientOtpRequests',
@@ -164,6 +201,8 @@ await db.batch([
           VALUES (2, 1, 'Vencimiento tecnomecánica', 1, 20, 'date')`, args: [] },
   { sql: `INSERT OR IGNORE INTO CategoriaSugerencias (id, categoriaID, name, active, sort_order, data_type)
           VALUES (3, 1, 'Día Pico y placa', 1, 30, 'text')`, args: [] },
+  { sql: `INSERT OR IGNORE INTO EntityEventTypes (id, categoriaID, name, active, sort_order, fields_json)
+          VALUES (1, 1, 'Mantenimiento', 1, 10, '[]')`, args: [] },
 ], 'write')
 
 // Cliente de prueba: es el dueño de la ficha local.
