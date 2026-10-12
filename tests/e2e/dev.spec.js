@@ -84,8 +84,10 @@ test('admin configura tipos y campos de eventos por categoría', async ({ page }
 
   await iniciarSesionAdmin(page)
   try {
+    const categories = await (await api.get('/.netlify/functions/admin?action=category-options')).json()
+    const categoryId = categories[0].id
     await page.getByRole('button', { name: 'Tipos de eventos' }).click()
-    await expect(page.getByRole('heading', { name: 'Tipos de eventos' })).toBeVisible()
+    await expect(page.locator('h2').filter({ hasText: 'Tipos de eventos' })).toBeVisible()
     await page.getByRole('button', { name: 'Nuevo tipo' }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Nombre').fill(eventName)
@@ -95,7 +97,7 @@ test('admin configura tipos y campos de eventos por categoría', async ({ page }
     await expect(dialog).toBeHidden()
     await expect(page.getByText(eventName, { exact: true })).toBeVisible()
 
-    const types = await api.get('/.netlify/functions/admin?action=event-types&categoryId=1')
+    const types = await api.get(`/.netlify/functions/admin?action=event-types&categoryId=${categoryId}`)
     expect(types.ok()).toBeTruthy()
     const item = (await types.json()).items.find((candidate) => candidate.name === eventName)
     expect(item.fields).toEqual([{ name: 'Kilometraje', dataType: 'text', protected: false }])
